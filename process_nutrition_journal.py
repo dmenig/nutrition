@@ -1,8 +1,67 @@
 import os
 import pandas as pd
 import openpyxl
+import re
 from datetime import datetime, timedelta
 import glob
+
+
+# Define the WEIGHT constant as requested
+WEIGHT = "WEIGHT"
+
+
+def correct_sport_formula(formula):
+    """
+    Corrects the sport formula string.
+    - Replaces cell references (e.g., `F316`) with the `WEIGHT` constant.
+    - Converts multiplications by 8 (e.g., `10*8`) into `weight_lifting(10)`.
+    - Evaluates other simple numeric multiplications (e.g., `7*9` becomes `63`).
+    - Converts standalone integers that are multiples of 8 into `weight_lifting(number)` calls.
+    - Ensures that numbers inside existing function calls are not modified.
+    """
+    if not isinstance(formula, str):
+        return formula
+
+    formula = formula.strip().lstrip("=")
+
+    if re.fullmatch(r"\$?[A-Z]+\$?\d+", formula):
+        return WEIGHT
+    formula = re.sub(r"\$?[A-Z]+\$?\d+", WEIGHT, formula)
+
+    # First, apply the more specific rule for 'number * 8'
+    def replace_weight_lifting_mult(m):
+        number = m.group(1)
+        return f"weight_lifting({number})"
+
+    formula = re.sub(r"(\d+)\s*\*\s*8\b", replace_weight_lifting_mult, formula)
+
+    # Evaluate other simple numeric multiplications
+    def eval_mult(m):
+        val = float(m.group(1)) * float(m.group(2))
+        return str(int(val)) if val == int(val) else str(val)
+
+    while re.search(r"(\b\d+\.?\d*\b)\s*\*\s*(\b\d+\.?\d*\b)", formula):
+        formula = re.sub(
+            r"(\b\d+\.?\d*\b)\s*\*\s*(\b\d+\.?\d*\b)", eval_mult, formula, count=1
+        )
+
+    # Second, apply the rule for standalone numbers that are multiples of 8,
+    # using a negative lookbehind to avoid nesting.
+    def replace_standalone_multiple_of_8(m):
+        num_str = m.group(1)
+        num = int(num_str)
+        if num % 8 == 0 and num != 0:
+            return f"weight_lifting({num})"
+        return num_str
+
+    formula = re.sub(
+        r"(?<!weight_lifting\()\b(\d+)\b", replace_standalone_multiple_of_8, formula
+    )
+
+    if formula == "WEIGHT":
+        return WEIGHT
+
+    return formula
 
 
 def process_nutrition_journal():
@@ -65,6 +124,11 @@ def process_nutrition_journal():
 
         # --- 4. Filter "Journal" data ---
         filtered_journal_df = journal_df[journal_df["Date"] >= "2024-06-30"].copy()
+
+        # Apply the correction function to the 'Sport' column
+        filtered_journal_df["Sport"] = filtered_journal_df["Sport"].apply(
+            correct_sport_formula
+        )
 
         # --- 5. Save processed "Journal" data ---
         filtered_journal_df.to_csv("processed_journal.csv", index=False)
