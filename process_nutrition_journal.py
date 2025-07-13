@@ -2,66 +2,75 @@ import os
 import pandas as pd
 import openpyxl
 import re
+from openpyxl.utils import get_column_letter
 from datetime import datetime, timedelta
 import glob
+import ast
+from utils import SafeFormulaEvaluator
 
 
-# Define the WEIGHT constant as requested
-WEIGHT = "WEIGHT"
-
-
-def correct_sport_formula(formula):
+def evaluate_weight_cell(pds_cell, sheet_values):
     """
-    Corrects the sport formula string.
-    - Replaces cell references (e.g., `F316`) with the `WEIGHT` constant.
-    - Converts multiplications by 8 (e.g., `10*8`) into `weight_lifting(10)`.
-    - Evaluates other simple numeric multiplications (e.g., `7*9` becomes `63`).
-    - Converts standalone integers that are multiples of 8 into `weight_lifting(number)` calls.
-    - Ensures that numbers inside existing function calls are not modified.
+    Evaluates the weight cell, handling both direct values and formulas.
+    If the cell contains a formula, it safely evaluates it by substituting
+    cell references with their actual values from the sheet.
     """
-    if not isinstance(formula, str):
-        return formula
+    if pds_cell.data_type == "f":  # It's a formula
+        formula = pds_cell.value
+        expression = formula.lstrip("=")
 
-    formula = formula.strip().lstrip("=")
+        # Find all cell references (e.g., A1, $B$2)
+        cell_references = re.findall(r"(\$?[A-Z]+\$?\d+)", expression)
 
-    if re.fullmatch(r"\$?[A-Z]+\$?\d+", formula):
-        return WEIGHT
-    formula = re.sub(r"\$?[A-Z]+\$?\d+", WEIGHT, formula)
+        # Substitute references with their values from the values-only sheet
+        for cell_ref in sorted(list(set(cell_references)), key=len, reverse=True):
+            cell_value = sheet_values[cell_ref].value
+            if cell_value is None:
+                cell_value = 0
+            expression = expression.replace(cell_ref, str(cell_value))
 
-    # First, apply the more specific rule for 'number * 8'
-    def replace_weight_lifting_mult(m):
-        number = m.group(1)
-        return f"weight_lifting({number})"
+        # Safely evaluate the final expression
+        try:
+            evaluator = SafeFormulaEvaluator()
+            node = ast.parse(expression, mode="eval").body
+            return evaluator.visit(node)
+        except (SyntaxError, NameError, TypeError, ValueError) as e:
+            print(f"Could not evaluate formula {formula}: {e}")
+            return pds_cell.value  # Fallback to the formula string on error
+    else:  # It's a direct value
+        return pds_cell.value
 
-    formula = re.sub(r"(\d+)\s*\*\s*8\b", replace_weight_lifting_mult, formula)
 
-    # Evaluate other simple numeric multiplications
-    def eval_mult(m):
-        val = float(m.group(1)) * float(m.group(2))
-        return str(int(val)) if val == int(val) else str(val)
+def resolve_excel_references_in_sport_expression(
+    sport_expression: str, sheet_values, pds_column_letter: str
+) -> str:
+    """
+    Resolves Excel cell references within a sport expression string using values from the sheet.
+    """
+    if not isinstance(sport_expression, str):
+        return ""
 
-    while re.search(r"(\b\d+\.?\d*\b)\s*\*\s*(\b\d+\.?\d*\b)", formula):
-        formula = re.sub(
-            r"(\b\d+\.?\d*\b)\s*\*\s*(\b\d+\.?\d*\b)", eval_mult, formula, count=1
-        )
+    expression = sport_expression.lstrip("=")
 
-    # Second, apply the rule for standalone numbers that are multiples of 8,
-    # using a negative lookbehind to avoid nesting.
-    def replace_standalone_multiple_of_8(m):
-        num_str = m.group(1)
-        num = int(num_str)
-        if num % 8 == 0 and num != 0:
-            return f"weight_lifting({num})"
-        return num_str
+    # Find all cell references (e.g., A1, $B$2)
+    cell_references = re.findall(r"(\$?[A-Z]+\$?\d+)", expression)
 
-    formula = re.sub(
-        r"(?<!weight_lifting\()\b(\d+)\b", replace_standalone_multiple_of_8, formula
-    )
+    # Substitute references with their values from the values-only sheet
+    for cell_ref in sorted(list(set(cell_references)), key=len, reverse=True):
+        # Extract the column part from cell_ref (e.g., "A" from "A1" or "$A$1")
+        match = re.match(r"(\$?[A-Z]+)", cell_ref)
+        if match:
+            column_part = match.group(1).replace("$", "")
+            if column_part == pds_column_letter:
+                expression = expression.replace(cell_ref, "WEIGHT")
+                continue  # Skip numerical substitution for weight references
 
-    if formula == "WEIGHT":
-        return WEIGHT
+        cell_value = sheet_values[cell_ref].value
+        if cell_value is None:
+            cell_value = 0
+        expression = expression.replace(cell_ref, str(cell_value))
 
-    return formula
+    return expression
 
 
 def process_nutrition_journal():
@@ -84,23 +93,32 @@ def process_nutrition_journal():
 
     # --- 2. Process "Journal" sheet ---
     try:
-        workbook = openpyxl.load_workbook(source_file, data_only=False)
-        sheet = workbook["Journal"]
+        workbook_formulas = openpyxl.load_workbook(source_file, data_only=False)
+        sheet_formulas = workbook_formulas["Journal"]
+        workbook_values = openpyxl.load_workbook(source_file, data_only=True)
+        sheet_values = workbook_values["Journal"]
 
-        header = [cell.value for cell in sheet[1]]
+        header = [cell.value for cell in sheet_formulas[1]]
         date_col_idx = header.index("Date")
         pds_col_idx = header.index("Pds")
         nourriture_col_idx = header.index("Nourriture")
         sport_col_idx = header.index("Sport")
 
+        pds_column_letter = get_column_letter(pds_col_idx + 1)
+
         data = []
         current_date = None
         first_date_found = False
 
-        # --- 3. Reconstruct dates with increment ---
-        for row_cells in sheet.iter_rows(min_row=2):
+        # --- 3. Reconstruct dates and combine data ---
+        rows_formulas = sheet_formulas.iter_rows(
+            min_row=2, max_row=sheet_formulas.max_row
+        )
+        rows_values = sheet_values.iter_rows(min_row=2, max_row=sheet_values.max_row)
+
+        for row_formulas, row_values in zip(rows_formulas, rows_values):
             if not first_date_found:
-                date_cell_value = row_cells[date_col_idx].value
+                date_cell_value = row_formulas[date_col_idx].value
                 if date_cell_value is not None and isinstance(
                     date_cell_value, datetime
                 ):
@@ -109,12 +127,18 @@ def process_nutrition_journal():
             elif current_date:
                 current_date += timedelta(days=1)
 
+            pds_cell = row_formulas[pds_col_idx]
+            pds_value = evaluate_weight_cell(pds_cell, sheet_values)
             data.append(
                 {
                     "Date": current_date,
-                    "Pds": row_cells[pds_col_idx].value,
-                    "Nourriture": row_cells[nourriture_col_idx].value,
-                    "Sport": row_cells[sport_col_idx].value,
+                    "Pds": pds_value,
+                    "Nourriture": row_formulas[nourriture_col_idx].value,
+                    "Sport": resolve_excel_references_in_sport_expression(
+                        row_formulas[sport_col_idx].value,
+                        sheet_values,
+                        pds_column_letter,
+                    ),
                 }
             )
 
@@ -125,15 +149,11 @@ def process_nutrition_journal():
         # --- 4. Filter "Journal" data ---
         filtered_journal_df = journal_df[journal_df["Date"] >= "2024-06-30"].copy()
 
-        # Apply the correction function to the 'Sport' column
-        filtered_journal_df["Sport"] = filtered_journal_df["Sport"].apply(
-            correct_sport_formula
-        )
-
         # --- 5. Save processed "Journal" data ---
-        filtered_journal_df.to_csv("processed_journal.csv", index=False)
+        output_journal_path = os.path.join(data_dir, "processed_journal.csv")
+        filtered_journal_df.to_csv(output_journal_path, index=False)
         print(
-            "Successfully processed 'Journal' sheet and saved to processed_journal.csv"
+            f"Successfully processed 'Journal' sheet and saved to {output_journal_path}"
         )
 
     except (KeyError, ValueError) as e:
@@ -148,8 +168,11 @@ def process_nutrition_journal():
     # --- 6. Process and save "Variables" sheet ---
     try:
         variables_df = pd.read_excel(source_file, sheet_name="Variables")
-        variables_df.to_csv("variables.csv", index=False)
-        print("Successfully processed 'Variables' sheet and saved to variables.csv")
+        output_variables_path = os.path.join(data_dir, "variables.csv")
+        variables_df.to_csv(output_variables_path, index=False)
+        print(
+            f"Successfully processed 'Variables' sheet and saved to {output_variables_path}"
+        )
     except Exception as e:
         print(f"Could not process 'Variables' sheet: {e}")
 

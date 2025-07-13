@@ -1,0 +1,2 @@
+- Never put try except statements in python files for this project. All errors should make all scripts directly failed, and you should ask the user for their specific resolution.
+- Never read or print a full csv or json. Only read 3 lines max.
