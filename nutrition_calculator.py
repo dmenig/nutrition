@@ -17,7 +17,7 @@ def get_nutrient_context(nutrient: str, variables_df: pd.DataFrame) -> dict:
     """
     nutrient_context = {}
     for _, row in variables_df.iterrows():
-        food_name = strip_accents(str(row["Nom"]).lower())
+        food_name = strip_accents(str(row["Nom"]).lower().strip())
         if nutrient in row and pd.notna(row[nutrient]):
             nutrient_context[food_name] = float(row[nutrient])
     return nutrient_context
@@ -39,7 +39,8 @@ def calculate_nutrient_from_formula_with_context(
     """
     try:
         # Normalize food_formula before parsing
-        normalized_food_formula = strip_accents(formula.lower())
+        # Replace commas with dots for decimal compatibility
+        normalized_food_formula = strip_accents(formula.lower()).replace(",", ".")
         # Parse the expression into an AST
         node = ast.parse(normalized_food_formula, mode="eval")
         # Evaluate the AST using the safe evaluator with the prepared context

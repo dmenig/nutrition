@@ -58,7 +58,8 @@ class SafeFormulaEvaluator(ast.NodeVisitor):
         """Handles variable names."""
         if node.id in self.context:
             return self.context[node.id]
-        raise NameError(f"Name '{node.id}' is not defined in the given context.")
+        # If the name is not in the context, treat its value as 0
+        return 0
 
     def visit_Call(self, node):
         """Disallow function calls for security."""
