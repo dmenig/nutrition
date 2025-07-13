@@ -1,0 +1,2 @@
+- If you have the `Code` role, abandon your task if you're not immediately succeeding at your instructions. Any bug, failure : you stop and you report.
+- If you are creating a task for the `Code` role, tell to abandon after any failure and directly report the results.
