@@ -3,6 +3,7 @@ import sport_formulas
 import nutrition_calculator
 import pandas as pd
 import ast
+from utils import SafeSportFormulaEvaluator, strip_accents
 
 
 def calculate_sport_calories(row: pd.Series) -> float:
@@ -22,31 +23,44 @@ def calculate_sport_calories(row: pd.Series) -> float:
     if not isinstance(sport_formula, str) or not sport_formula.strip():
         return 0.0
 
-    try:
-        node = ast.parse(sport_formula, mode="eval")
+    node = ast.parse(sport_formula, mode="eval")
 
-        if not isinstance(node.body, ast.Call):
-            raise ValueError("Sport formula must be a single function call.")
+    # Prepare the context for the formula evaluator
+    # It needs the sport functions and the current weight
+    context = sport_formulas.SPORT_FUNCTIONS.copy()
+    context["WEIGHT"] = weight
 
-        func_name = node.body.func.id.lower()
-        if func_name not in sport_formulas.SPORT_FUNCTIONS:
-            raise ValueError(f"Unknown sport function: {func_name}")
+    # Evaluate the formula
+    evaluator = SafeSportFormulaEvaluator(context)
+    return evaluator.visit(node.body)
 
-        # Extract keyword arguments from the formula string
-        kwargs = {kw.arg: ast.literal_eval(kw.value) for kw in node.body.keywords}
 
-        # Add weight to the arguments
-        kwargs["weight_kg"] = weight
+def build_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Builds features from the raw data.
+    """
+    print("--- Starting Feature Building ---")
 
-        sport_function = sport_formulas.SPORT_FUNCTIONS[func_name]
+    # Calculate sport calories and handle original 'Sport' column
+    if "Sport" in df.columns and "Pds" in df.columns:
+        df["sport"] = df.apply(calculate_sport_calories, axis=1)
+        df.drop(columns=["Sport"], inplace=True)
+    else:
+        df["sport"] = 0.0
 
-        return sport_function(**kwargs)
+    # Clean and format all column names
+    new_columns = {}
+    for col in df.columns:
+        new_col = strip_accents(str(col)).replace(" ", "_").lower()
+        new_columns[col] = new_col
+    df.rename(columns=new_columns, inplace=True)
 
-    except (ValueError, SyntaxError, TypeError, KeyError) as e:
-        print(
-            f"Warning: Could not parse sport formula '{sport_formula}': {e}. Setting to 0."
-        )
-        return 0.0
+    # Specifically rename 'calories_/_100g' to 'calories'
+    if "calories_/_100g" in df.columns:
+        df.rename(columns={"calories_/_100g": "calories"}, inplace=True)
+
+    print("--- Feature Building Complete ---")
+    return df
 
 
 def main():
@@ -58,24 +72,9 @@ def main():
     # Load data and calculate nutritional features
     features_df = data_processor.load_and_process_data()
 
-    print("\n--- Calculating Sport Calories ---")
-    if "Sport" in features_df.columns and "Pds" in features_df.columns:
-        features_df["calories_sport"] = features_df.apply(
-            calculate_sport_calories, axis=1
-        )
-        print("Successfully calculated sport calories.")
-        features_df.drop(columns=["Sport"], inplace=True)
-    else:
-        print("'Sport' or 'Pds' column not found, skipping sport calorie calculation.")
-        features_df["calories_sport"] = 0.0
+    # Build features
+    features_df = build_features(features_df)
 
-    # Ensure column names are consistently formatted
-    features_df.columns = [
-        str(col).lower().replace(" ", "_").replace("/", "_")
-        for col in features_df.columns
-    ]
-
-    print("\n--- Feature Building Complete ---")
     print("Successfully generated features DataFrame.")
     print(f"Shape: {features_df.shape}")
     print("\nFirst 5 rows of the features:")

@@ -53,24 +53,11 @@ def load_and_process_data(
         food_formula = str(row["Nourriture"]) if pd.notna(row["Nourriture"]) else ""
 
         for nutrient in all_nutrients:
-            try:
-                # Use the pre-loaded context for calculation
-                calculated_value = calculate_nutrient_from_formula_with_context(
-                    food_formula, nutrient_contexts[nutrient], nutrient
-                )
-                daily_data[
-                    strip_accents(nutrient).replace(" ", "_").replace("/", "_").lower()
-                ] = calculated_value / 100
-            except ValueError as e:
-                print(
-                    f"Warning: Could not calculate {nutrient} for {date}: {e}. Setting to 0."
-                )
-                daily_data[strip_accents(nutrient).replace(" ", "_").lower()] = 0
-            except Exception as e:
-                print(
-                    f"An unexpected error occurred for {nutrient} on {date}: {e}. Setting to 0."
-                )
-                daily_data[strip_accents(nutrient).replace(" ", "_").lower()] = 0
+            # Use the pre-loaded context for calculation
+            calculated_value = calculate_nutrient_from_formula_with_context(
+                food_formula, nutrient_contexts[nutrient], nutrient
+            )
+            daily_data[nutrient] = calculated_value
         daily_nutrients_data.append(daily_data)
 
     features_df = pd.DataFrame(daily_nutrients_data)

@@ -49,15 +49,10 @@ def main():
             )
             continue
 
-        try:
-            calculated_kcal = calculate_nutrient_from_formula(
-                str(formula), "Calories / 100g"
-            )
-            print(f"Formula: '{formula}' -> Kcal: {calculated_kcal:.2f}")
-        except ValueError as e:
-            print(f"Error calculating Kcal for formula '{formula}': {e}")
-        except Exception as e:
-            print(f"An unexpected error occurred for formula '{formula}': {e}")
+        calculated_kcal = calculate_nutrient_from_formula(
+            str(formula), "Calories / 100g"
+        )
+        print(f"Formula: '{formula}' -> Kcal: {calculated_kcal:.2f}")
 
 
 if __name__ == "__main__":

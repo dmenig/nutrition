@@ -1,4 +1,6 @@
 import unicodedata
+import ast
+import operator as op
 
 
 def strip_accents(text):
@@ -8,10 +10,6 @@ def strip_accents(text):
     return "".join(
         c for c in unicodedata.normalize("NFD", text) if unicodedata.category(c) != "Mn"
     )
-
-
-import ast
-import operator as op
 
 
 class SafeFormulaEvaluator(ast.NodeVisitor):
@@ -39,8 +37,6 @@ class SafeFormulaEvaluator(ast.NodeVisitor):
         """Handles numeric and string literals."""
         if isinstance(node.value, (int, float)):
             return node.value
-        # For safety, you might want to restrict what kind of constants are allowed.
-        # Here, we only allow numbers.
         raise TypeError(f"Unsupported constant type: {type(node.value)}")
 
     def visit_BinOp(self, node):
@@ -58,9 +54,25 @@ class SafeFormulaEvaluator(ast.NodeVisitor):
         """Handles variable names."""
         if node.id in self.context:
             return self.context[node.id]
-        # If the name is not in the context, treat its value as 0
         return 0
 
     def visit_Call(self, node):
         """Disallow function calls for security."""
         raise ValueError("Function calls are not allowed in formulas.")
+
+
+class SafeSportFormulaEvaluator(SafeFormulaEvaluator):
+    """
+    A safe AST node visitor for evaluating sport formulas.
+    Inherits from SafeFormulaEvaluator and adds support for calling whitelisted functions.
+    """
+
+    def visit_Call(self, node):
+        """Handles whitelisted function calls."""
+        func_name = node.func.id
+        if func_name in self.context and callable(self.context[func_name]):
+            # The plan's formulas use positional args, but keyword args are safer.
+            # The implementation will expect keyword arguments.
+            kwargs = {kw.arg: self.visit(kw.value) for kw in node.keywords}
+            return self.context[func_name](**kwargs)
+        raise ValueError(f"Unsupported function call: {func_name}")

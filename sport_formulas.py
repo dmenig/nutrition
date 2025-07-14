@@ -46,7 +46,7 @@ def CYCLING_CALORIES(
 # The keys are the function names in the formula (case-insensitive).
 # The values are the actual function objects.
 SPORT_FUNCTIONS = {
-    "walking_calories": WALKING_CALORIES,
-    "running_calories": RUNNING_CALORIES,
-    "cycling_calories": CYCLING_CALORIES,
+    "WALKING_CALORIES": WALKING_CALORIES,
+    "RUNNING_CALORIES": RUNNING_CALORIES,
+    "CYCLING_CALORIES": CYCLING_CALORIES,
 }

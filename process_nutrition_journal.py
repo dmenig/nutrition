@@ -92,78 +92,62 @@ def process_nutrition_journal():
     source_file = xlsx_files[0]
 
     # --- 2. Process "Journal" sheet ---
-    try:
-        workbook_formulas = openpyxl.load_workbook(source_file, data_only=False)
-        sheet_formulas = workbook_formulas["Journal"]
-        workbook_values = openpyxl.load_workbook(source_file, data_only=True)
-        sheet_values = workbook_values["Journal"]
+    workbook_formulas = openpyxl.load_workbook(source_file, data_only=False)
+    sheet_formulas = workbook_formulas["Journal"]
+    workbook_values = openpyxl.load_workbook(source_file, data_only=True)
+    sheet_values = workbook_values["Journal"]
 
-        header = [cell.value for cell in sheet_formulas[1]]
-        date_col_idx = header.index("Date")
-        pds_col_idx = header.index("Pds")
-        nourriture_col_idx = header.index("Nourriture")
-        sport_col_idx = header.index("Sport")
+    header = [cell.value for cell in sheet_formulas[1]]
+    date_col_idx = header.index("Date")
+    pds_col_idx = header.index("Pds")
+    nourriture_col_idx = header.index("Nourriture")
+    sport_col_idx = header.index("Sport")
 
-        pds_column_letter = get_column_letter(pds_col_idx + 1)
+    pds_column_letter = get_column_letter(pds_col_idx + 1)
 
-        data = []
-        current_date = None
-        first_date_found = False
+    data = []
+    current_date = None
+    first_date_found = False
 
-        # --- 3. Reconstruct dates and combine data ---
-        rows_formulas = sheet_formulas.iter_rows(
-            min_row=2, max_row=sheet_formulas.max_row
-        )
-        rows_values = sheet_values.iter_rows(min_row=2, max_row=sheet_values.max_row)
+    # --- 3. Reconstruct dates and combine data ---
+    rows_formulas = sheet_formulas.iter_rows(min_row=2, max_row=sheet_formulas.max_row)
+    rows_values = sheet_values.iter_rows(min_row=2, max_row=sheet_values.max_row)
 
-        for row_formulas, row_values in zip(rows_formulas, rows_values):
-            if not first_date_found:
-                date_cell_value = row_formulas[date_col_idx].value
-                if date_cell_value is not None and isinstance(
-                    date_cell_value, datetime
-                ):
-                    current_date = date_cell_value.date()
-                    first_date_found = True
-            elif current_date:
-                current_date += timedelta(days=1)
+    for row_formulas, row_values in zip(rows_formulas, rows_values):
+        if not first_date_found:
+            date_cell_value = row_formulas[date_col_idx].value
+            if date_cell_value is not None and isinstance(date_cell_value, datetime):
+                current_date = date_cell_value.date()
+                first_date_found = True
+        elif current_date:
+            current_date += timedelta(days=1)
 
-            pds_cell = row_formulas[pds_col_idx]
-            pds_value = evaluate_weight_cell(pds_cell, sheet_values)
-            data.append(
-                {
-                    "Date": current_date,
-                    "Pds": pds_value,
-                    "Nourriture": row_formulas[nourriture_col_idx].value,
-                    "Sport": resolve_excel_references_in_sport_expression(
-                        row_formulas[sport_col_idx].value,
-                        sheet_values,
-                        pds_column_letter,
-                    ),
-                }
-            )
-
-        journal_df = pd.DataFrame(data)
-        journal_df.dropna(subset=["Date"], inplace=True)
-        journal_df["Date"] = pd.to_datetime(journal_df["Date"])
-
-        # --- 4. Filter "Journal" data ---
-        filtered_journal_df = journal_df[journal_df["Date"] >= "2024-06-30"].copy()
-
-        # --- 5. Save processed "Journal" data ---
-        output_journal_path = os.path.join(data_dir, "processed_journal.csv")
-        filtered_journal_df.to_csv(output_journal_path, index=False)
-        print(
-            f"Successfully processed 'Journal' sheet and saved to {output_journal_path}"
+        pds_cell = row_formulas[pds_col_idx]
+        pds_value = evaluate_weight_cell(pds_cell, sheet_values)
+        data.append(
+            {
+                "Date": current_date,
+                "Pds": pds_value,
+                "Nourriture": row_formulas[nourriture_col_idx].value,
+                "Sport": resolve_excel_references_in_sport_expression(
+                    row_formulas[sport_col_idx].value,
+                    sheet_values,
+                    pds_column_letter,
+                ),
+            }
         )
 
-    except (KeyError, ValueError) as e:
-        print(
-            f"Error processing 'Journal' sheet: Required sheet or column not found. Details: {e}"
-        )
-        return
-    except Exception as e:
-        print(f"An unexpected error occurred while processing the 'Journal' sheet: {e}")
-        return
+    journal_df = pd.DataFrame(data)
+    journal_df.dropna(subset=["Date"], inplace=True)
+    journal_df["Date"] = pd.to_datetime(journal_df["Date"])
+
+    # --- 4. Filter "Journal" data ---
+    filtered_journal_df = journal_df[journal_df["Date"] >= "2024-06-30"].copy()
+
+    # --- 5. Save processed "Journal" data ---
+    output_journal_path = os.path.join(data_dir, "processed_journal.csv")
+    filtered_journal_df.to_csv(output_journal_path, index=False)
+    print(f"Successfully processed 'Journal' sheet and saved to {output_journal_path}")
 
     # --- 6. Process and save "Variables" sheet ---
     try:
