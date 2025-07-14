@@ -1,0 +1,2 @@
+- Abandon your task if you're not immediately succeeding at your instructions. Any bug, failure : you stop and you report.
+- Repeat : if you encounter ANY error not specified in the task outline, abort abandon and report the failure. Don't solve it yourself unless the task specifically asks you to.
