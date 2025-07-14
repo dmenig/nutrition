@@ -23,6 +23,7 @@ def calculate_sport_calories(row: pd.Series) -> float:
     if not isinstance(sport_formula, str) or not sport_formula.strip():
         return 0.0
 
+    sport_formula = sport_formula.strip()
     node = ast.parse(sport_formula, mode="eval")
 
     # Prepare the context for the formula evaluator
@@ -58,6 +59,15 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # Specifically rename 'calories_/_100g' to 'calories'
     if "calories_/_100g" in df.columns:
         df.rename(columns={"calories_/_100g": "calories"}, inplace=True)
+
+    # Ensure 'calories' column exists, if not, create it with 0s
+    if "calories" not in df.columns:
+        df["calories"] = 0
+
+    # Ensure other required columns exist
+    for col in ["carbs", "sugar", "sel", "alcool", "water"]:
+        if col not in df.columns:
+            df[col] = 0
 
     print("--- Feature Building Complete ---")
     return df

@@ -57,7 +57,11 @@ class WeightModel:
         self.look_back_window = look_back_window
 
     def _prepare_f_water_features(
-        self, current_idx: int, data_df: pd.DataFrame, results_df: pd.DataFrame
+        self,
+        current_idx: int,
+        data_df: pd.DataFrame,
+        results_df: pd.DataFrame,
+        w_act_col: str = "W_act_t",
     ) -> pd.DataFrame:
         """
         Constructs features for the WaterRetentionModel.
@@ -79,7 +83,7 @@ class WeightModel:
         prev_result = results_df.iloc[current_idx - 1]
         c_in_t_minus_1 = prev_result["C_in_t"]
         c_exp_t_minus_1 = prev_result["C_exp_t"]
-        w_act_t_minus_1 = prev_result["W_act_t"]
+        w_act_t_minus_1 = prev_result[w_act_col]
 
         features["c_in_minus_c_exp"] = c_in_t_minus_1 - c_exp_t_minus_1
         features["w_act_t_minus_1"] = w_act_t_minus_1
@@ -92,12 +96,15 @@ class WeightModel:
         """
         historical_X_list = []
         historical_y_list = []
+        w_act_col = "W_act" if "W_act" in results_df.columns else "W_act_t"
         for i in range(1, len(results_df)):
-            features = self._prepare_f_water_features(i, data_df, results_df)
+            features = self._prepare_f_water_features(
+                i, data_df, results_df, w_act_col=w_act_col
+            )
             if features is not None:
                 historical_X_list.append(features)
                 w_obs_i = results_df.loc[i, "W_obs_t"]
-                w_act_i = results_df.loc[i, "W_act_t"]
+                w_act_i = results_df.loc[i, w_act_col]
                 historical_y_list.append(w_obs_i - w_act_i)
 
         if len(historical_X_list) > 1:
@@ -112,7 +119,7 @@ class WeightModel:
         results_list = []
         M_t = self.initial_M_base
 
-        W_act_t = data_df.loc[0, "weight"]
+        W_act_t = data_df.loc[0, "pds"]
         C_in_t = data_df.loc[0, "calories"]
         C_exp_t = M_t + data_df.loc[0, "sport"]
 
@@ -125,7 +132,7 @@ class WeightModel:
                 "W_act_t": W_act_t,
                 "WR_t": 0,
                 "W_pred_t": W_act_t,
-                "W_obs_t": data_df.loc[0, "weight"],
+                "W_obs_t": data_df.loc[0, "pds"],
             }
         )
 
@@ -136,8 +143,8 @@ class WeightModel:
             M_t_minus_1 = prev_result["M_t"]
             W_act_t_minus_1 = prev_result["W_act_t"]
 
-            W_obs_t = data_df.loc[t, "weight"]
-            W_obs_t_minus_1 = data_df.loc[t - 1, "weight"]
+            W_obs_t = data_df.loc[t, "pds"]
+            W_obs_t_minus_1 = data_df.loc[t - 1, "pds"]
 
             W_act_t = (
                 W_act_t_minus_1 + (C_in_t_minus_1 - C_exp_t_minus_1) / self.K_cal_kg
@@ -176,4 +183,6 @@ class WeightModel:
                 }
             )
 
-        return pd.DataFrame(results_list)
+        results_df = pd.DataFrame(results_list)
+        results_df.rename(columns={"M_t": "M_base", "W_act_t": "W_act"}, inplace=True)
+        return results_df
