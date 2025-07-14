@@ -58,9 +58,9 @@ def load_and_process_data(
                 calculated_value = calculate_nutrient_from_formula_with_context(
                     food_formula, nutrient_contexts[nutrient], nutrient
                 )
-                daily_data[strip_accents(nutrient).replace(" ", "_").lower()] = (
-                    calculated_value
-                )
+                daily_data[
+                    strip_accents(nutrient).replace(" ", "_").replace("/", "_").lower()
+                ] = calculated_value / 100
             except ValueError as e:
                 print(
                     f"Warning: Could not calculate {nutrient} for {date}: {e}. Setting to 0."
