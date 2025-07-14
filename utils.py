@@ -5,6 +5,7 @@ import operator as op
 
 FOOD_NAME_MAPPINGS = {
     "salade boulgour quinoa fruits secsm": "salade boulgour quinoa fruits secs",
+    "caviar d'aubergine": "caviar d aubergine",
 }
 
 
