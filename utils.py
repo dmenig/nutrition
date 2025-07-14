@@ -52,9 +52,11 @@ class SafeFormulaEvaluator(ast.NodeVisitor):
 
     def visit_Name(self, node):
         """Handles variable names."""
-        if node.id in self.context:
-            return self.context[node.id]
-        return 0
+        # Normalize the variable name by replacing underscores with spaces
+        normalized_id = node.id.replace("_", " ")
+        if normalized_id in self.context:
+            return self.context[normalized_id]
+        raise NameError(f"Variable '{node.id}' is not defined.")
 
     def visit_Call(self, node):
         """Disallow function calls for security."""
@@ -69,10 +71,13 @@ class SafeSportFormulaEvaluator(SafeFormulaEvaluator):
 
     def visit_Call(self, node):
         """Handles whitelisted function calls."""
-        func_name = node.func.id
-        if func_name in self.context and callable(self.context[func_name]):
-            # The plan's formulas use positional args, but keyword args are safer.
-            # The implementation will expect keyword arguments.
-            kwargs = {kw.arg: self.visit(kw.value) for kw in node.keywords}
-            return self.context[func_name](**kwargs)
-        raise ValueError(f"Unsupported function call: {func_name}")
+        if isinstance(node.func, ast.Name):
+            func_name = node.func.id
+            if func_name in self.context and callable(self.context[func_name]):
+                args = [self.visit(arg) for arg in node.args]
+                kwargs = {kw.arg: self.visit(kw.value) for kw in node.keywords}
+                return self.context[func_name](*args, **kwargs)
+        if isinstance(node.func, ast.Name):
+            func_name = node.func.id
+            raise NameError(f"Function '{func_name}' is not allowed.")
+        raise NameError("Indirect function calls are not allowed.")

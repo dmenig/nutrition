@@ -17,7 +17,7 @@ def get_nutrient_context(nutrient: str, variables_df: pd.DataFrame) -> dict:
     """
     nutrient_context = {}
     for _, row in variables_df.iterrows():
-        food_name = strip_accents(str(row["Nom"]).lower().strip())
+        food_name = strip_accents(str(row["Nom"]).lower().strip()).replace("_", " ")
         if nutrient in row and pd.notna(row[nutrient]):
             nutrient_context[food_name] = float(row[nutrient])
     return nutrient_context
@@ -37,20 +37,22 @@ def calculate_nutrient_from_formula_with_context(
     Returns:
         The calculated total nutrient value.
     """
+    # Normalize food_formula before parsing
+    # Replace commas with dots for decimal compatibility
+    normalized_food_formula = strip_accents(formula.lower()).replace(",", ".")
+    # Parse the expression into an AST
+    node = ast.parse(normalized_food_formula, mode="eval")
+    # Evaluate the AST using the safe evaluator with the prepared context
+    evaluator = SafeFormulaEvaluator(context=nutrient_context)
     try:
-        # Normalize food_formula before parsing
-        # Replace commas with dots for decimal compatibility
-        normalized_food_formula = strip_accents(formula.lower()).replace(",", ".")
-        # Parse the expression into an AST
-        node = ast.parse(normalized_food_formula, mode="eval")
-        # Evaluate the AST using the safe evaluator with the prepared context
-        evaluator = SafeFormulaEvaluator(context=nutrient_context)
         result = evaluator.visit(node.body)
-        return result
-    except (TypeError, NameError, ValueError) as e:
+    except NameError as e:
+        # Extract the variable name from the NameError message
+        variable_name = str(e).split("'")[1]
         raise ValueError(
-            f"Error evaluating formula '{formula}' for nutrient '{nutrient}': {e}"
-        )
+            f"Name '{variable_name}' is not defined in the given context."
+        ) from e
+    return result
 
 
 def calculate_nutrient_from_formula(

@@ -17,7 +17,9 @@ def setup_teardown_variables_csv():
         writer = csv.writer(csvfile)
         writer.writerow(["Nom", "Kcal", "Protéine", "Glucide", "Lipide"])
         writer.writerow(["Pomme", "52", "0.3", "14", "0.2"])
+        writer.writerow(["Pomme verte", "60", "0.4", "15", "0.1"])
         writer.writerow(["Banane", "89", "1.1", "23", "0.3"])
+        writer.writerow(["Banane_plantain", "89", "1.1", "23", "0.3"])
         writer.writerow(["Lait", "42", "3.4", "4.8", "1"])
         writer.writerow(["Pain", "265", "9", "49", "3.2"])
         writer.writerow(["Fromage", "402", "25", "1.3", "33"])
@@ -134,3 +136,28 @@ def test_formula_with_parentheses_and_mixed_operations(setup_teardown_variables_
     formula = "Pain * (10 + 5) - Fromage * 2"
     result_kcal = calculate_nutrient_from_formula(formula, "Kcal", TEMP_VARIABLES_CSV)
     assert result_kcal == pytest.approx(3171.0)
+
+
+def test_formula_with_underscores_in_food_name(setup_teardown_variables_csv):
+    """
+    Tests that a formula with underscores in a food name is correctly interpreted.
+    Formula: "Pomme_verte * 100"
+    Expected Kcal: 60 * 100 = 6000
+    """
+    formula = "Pomme_verte * 100"
+    result_kcal = calculate_nutrient_from_formula(formula, "Kcal", TEMP_VARIABLES_CSV)
+    assert result_kcal == pytest.approx(6000.0)
+
+
+def test_interchangeable_spaces_and_underscores(setup_teardown_variables_csv):
+    """
+    Tests that food names with spaces and underscores are handled interchangeably.
+
+    This test is expected to fail.
+
+    Formula: "Pomme_verte * 100"
+    Expected Kcal: 60 * 100 = 6000 (from "Pomme verte" in CSV)
+    """
+    formula = "Pomme_verte * 100"
+    result_kcal = calculate_nutrient_from_formula(formula, "Kcal", TEMP_VARIABLES_CSV)
+    assert result_kcal == pytest.approx(6000.0)

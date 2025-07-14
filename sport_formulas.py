@@ -50,3 +50,25 @@ SPORT_FUNCTIONS = {
     "RUNNING_CALORIES": RUNNING_CALORIES,
     "CYCLING_CALORIES": CYCLING_CALORIES,
 }
+
+
+def evaluate_sport_formula(formula: str, weight: float) -> float:
+    """
+    Evaluates a sport formula string.
+    """
+    if not formula or formula.isspace():
+        return 0.0
+
+    # Prepare the context for safe evaluation
+    context = {
+        "WEIGHT": weight,
+        **SPORT_FUNCTIONS,
+    }
+
+    # Evaluate the formula using a safe evaluator
+    from utils import SafeSportFormulaEvaluator
+    import ast
+
+    evaluator = SafeSportFormulaEvaluator(context)
+    node = ast.parse(formula, mode="eval")
+    return evaluator.visit(node.body)

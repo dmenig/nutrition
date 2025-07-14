@@ -4,21 +4,21 @@ from sport_formulas import (
     RUNNING_CALORIES,
     CYCLING_CALORIES,
 )
-from calculate_nutrition import evaluate_sport_formula
+from sport_formulas import evaluate_sport_formula
 
 # Test cases for individual sport formula functions.
 # Each tuple contains: (function, args, expected_result)
 # args are (duration_minutes, weight_kg, param3, param4)
 FORMULA_TEST_CASES = [
     # WALKING_CALORIES
-    (WALKING_CALORIES, (60, 70, 7000, 3), 257.25),
-    (WALKING_CALORIES, (0, 70, 0, 0), 0.0),
+    (WALKING_CALORIES, (60, 7000, 3, 70), 257.25),
+    (WALKING_CALORIES, (0, 0, 0, 70), 0.0),
     # RUNNING_CALORIES
-    (RUNNING_CALORIES, (30, 75, 5, 10), 393.75),
-    (RUNNING_CALORIES, (0, 75, 0, 0), 0.0),
+    (RUNNING_CALORIES, (30, 5, 10, 75), 393.75),
+    (RUNNING_CALORIES, (0, 0, 0, 75), 0.0),
     # CYCLING_CALORIES
-    (CYCLING_CALORIES, (45, 80, 15, 20), 504.0),
-    (CYCLING_CALORIES, (0, 80, 0, 0), 0.0),
+    (CYCLING_CALORIES, (45, 15, 20, 80), 504.0),
+    (CYCLING_CALORIES, (0, 0, 0, 80), 0.0),
 ]
 
 
@@ -38,7 +38,7 @@ def test_evaluate_sport_formula_with_commas_and_functions():
     Tests evaluate_sport_formula with a complex formula including commas
     as decimal separators and multiple function calls, verifying the fix.
     """
-    formula = "15*8 + 2*WALKING_CALORIES(10,WEIGHT,700,4) + WALKING_CALORIES(27,WEIGHT,2800,2)"
+    formula = "15*8 + 2*WALKING_CALORIES(duration_minutes=10, weight_kg=70, steps=700, incline_percent=4) + WALKING_CALORIES(duration_minutes=27, weight_kg=70, steps=2800, incline_percent=2)"
     weight = 70.0  # Dummy weight value
     expected_calories = 321.5125  # Calculated: 120 + 2*42.875 + 115.7625
 
