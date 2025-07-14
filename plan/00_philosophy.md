@@ -32,7 +32,7 @@ The project follows a clear, sequential workflow, with each step producing a wel
 
 ```mermaid
 graph TD
-    A[Raw Data: journal.xlsx] --> B(data_processor.py);
+    A[Raw Data: processed_journal.csv] --> B(data_processor.py);
     B --> C[features.csv];
     C --> D(train_model.py);
     D --> E{Grid Search for Loss Weights};

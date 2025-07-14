@@ -1,1 +1,3 @@
 - If you are creating a task for the `Code` role, tell to abandon after any failure and directly report the results.
+- Never delegate the understanding of the project and the task to the code; Your instructions must be super specific for the Code.
+- When delegating to Code, ALWAYS delegate a small incremental part of the job ! Your prompt should not include more than 4 tasks !!!
