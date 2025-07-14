@@ -1,0 +1,1 @@
+- Abandon your task if you're not immediately succeeding at your instructions. Any bug, failure : you stop and you report.

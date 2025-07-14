@@ -1,0 +1,1 @@
+- If you are creating a task for the `Code` role, tell to abandon after any failure and directly report the results.
