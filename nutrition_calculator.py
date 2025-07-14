@@ -19,7 +19,9 @@ def get_nutrient_context(nutrient: str, variables_df: pd.DataFrame) -> dict:
     for _, row in variables_df.iterrows():
         food_name = str(row["Nom"])
         # Normalize the food name before adding it to the context
-        normalized_food_name = strip_accents(food_name.lower()).replace("_", " ")
+        normalized_food_name = (
+            strip_accents(food_name.lower()).replace(" ", "_").replace("'", "_")
+        )
         if nutrient in row and pd.notna(row[nutrient]):
             nutrient_context[normalized_food_name] = float(row[nutrient])
     return nutrient_context
@@ -41,20 +43,15 @@ def calculate_nutrient_from_formula_with_context(
     """
     # Normalize food_formula before parsing
     # Replace commas with dots for decimal compatibility
-    normalized_food_formula = strip_accents(formula.lower()).replace(",", ".")
+    formula = formula.replace(",", ".")
     # Parse the expression into an AST
-    node = ast.parse(normalized_food_formula, mode="eval")
+    node = ast.parse(formula, mode="eval")
     # Evaluate the AST using the safe evaluator with the prepared context
     evaluator = SafeFormulaEvaluator(context=nutrient_context)
-    try:
-        result = evaluator.visit(node.body)
-    except NameError as e:
-        # Extract the variable name from the NameError message
-        variable_name = str(e).split("'")[1]
-        raise ValueError(
-            f"Name '{variable_name}' is not defined in the given context."
-        ) from e
-    return result
+    result = evaluator.visit(node.body)
+    if nutrient == "Calories / 100g":
+        return result
+    return result / 100
 
 
 def calculate_nutrient_from_formula(

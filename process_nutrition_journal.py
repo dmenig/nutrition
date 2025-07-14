@@ -31,16 +31,11 @@ def evaluate_weight_cell(pds_cell, sheet_values):
             expression = expression.replace(cell_ref, str(cell_value))
 
         # Safely evaluate the final expression
-        try:
-            evaluator = SafeFormulaEvaluator()
-            node = ast.parse(expression, mode="eval").body
-            result = evaluator.visit(node)
-            print(f"Formula evaluated to: {result}")
-            return result
-        except (SyntaxError, NameError, TypeError, ValueError) as e:
-            print(f"Could not evaluate formula {formula}: {e}")
-            print("Falling back to formula string.")
-            return pds_cell.value  # Fallback to the formula string on error
+        evaluator = SafeFormulaEvaluator()
+        node = ast.parse(expression, mode="eval").body
+        result = evaluator.visit(node)
+        print(f"Formula evaluated to: {result}")
+        return result
     else:  # It's a direct value
         return float(pds_cell.value)
 
@@ -77,7 +72,7 @@ def resolve_excel_references_in_sport_expression(
     return expression
 
 
-def process_nutrition_journal():
+def main():
     """
     Processes a nutrition journal from an Excel file.
     1. Finds the first .xlsx file in the current directory.
@@ -155,16 +150,13 @@ def process_nutrition_journal():
     print(f"Successfully processed 'Journal' sheet and saved to {output_journal_path}")
 
     # --- 6. Process and save "Variables" sheet ---
-    try:
-        variables_df = pd.read_excel(source_file, sheet_name="Variables")
-        output_variables_path = os.path.join(data_dir, "variables.csv")
-        variables_df.to_csv(output_variables_path, index=False)
-        print(
-            f"Successfully processed 'Variables' sheet and saved to {output_variables_path}"
-        )
-    except Exception as e:
-        print(f"Could not process 'Variables' sheet: {e}")
+    variables_df = pd.read_excel(source_file, sheet_name="Variables")
+    output_variables_path = os.path.join(data_dir, "variables.csv")
+    variables_df.to_csv(output_variables_path, index=False)
+    print(
+        f"Successfully processed 'Variables' sheet and saved to {output_variables_path}"
+    )
 
 
 if __name__ == "__main__":
-    process_nutrition_journal()
+    main()

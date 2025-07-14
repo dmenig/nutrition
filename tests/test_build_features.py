@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from build_features import main as build_features_main
 from sport_formulas import WALKING_CALORIES, RUNNING_CALORIES
+from data_processor import normalize_food_names, save_normalized_variables
 
 
 def test_build_features_end_to_end():
@@ -27,52 +28,70 @@ def test_build_features_end_to_end():
                 "fromage de chèvre",
                 "poulet",
                 "seven_up_mojito",
+                "caviar d'aubergine",
             ],
-            "Calories / 100g": [364, 387, 259, 364, 239, 40],
-            "Protéine": [10.3, 0, 13.4, 21.6, 27.0, 0],
-            "Fat": [1.0, 0, 3.2, 29.8, 14.0, 0],
-            "SFat": [0.2, 0, 0.7, 20.2, 3.8, 0],
-            "Carbs": [76.3, 100, 41.3, 1.3, 0, 10.6],
-            "Sugar": [0.3, 100, 5.4, 0.5, 0, 10.6],
-            "Free sugar": [0, 100, 1.0, 0, 0, 10.6],
-            "Fibres": [2.7, 0, 6.0, 0, 0, 0],
-            "Sel": [0.01, 0, 1.4, 1.8, 0.2, 0.01],
-            "Alcool": [0, 0, 0, 0, 0, 0.5],
-            "Water": [12.0, 0, 35.0, 45.0, 60.0, 88.0],
+            "Calories / 100g": [364, 387, 259, 364, 239, 40, 150],
+            "Protéine": [10.3, 0, 13.4, 21.6, 27.0, 0, 2.0],
+            "Fat": [1.0, 0, 3.2, 29.8, 14.0, 0, 12.0],
+            "SFat": [0.2, 0, 0.7, 20.2, 3.8, 0, 1.5],
+            "Carbs": [76.3, 100, 41.3, 1.3, 0, 10.6, 5.0],
+            "Sugar": [0.3, 100, 5.4, 0.5, 0, 10.6, 3.0],
+            "Free sugar": [0, 100, 1.0, 0, 0, 10.6, 0.5],
+            "Fibres": [2.7, 0, 6.0, 0, 0, 0, 4.0],
+            "Sel": [0.01, 0, 1.4, 1.8, 0.2, 0.01, 1.2],
+            "Alcool": [0, 0, 0, 0, 0, 0.5, 0],
+            "Water": [12.0, 0, 35.0, 45.0, 60.0, 88.0, 75.0],
         }
     )
 
     journal_df = pd.DataFrame(
         {
             "Date": pd.to_datetime(
-                ["2024-01-01", "2024-01-02", "2024-01-03", "2024-01-04"]
+                ["2024-01-01", "2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05"]
             ),
-            "Pds": [80.0, 80.2, 80.1, 79.9],
+            "Pds": [80.0, 80.2, 80.1, 79.9, 79.8],
             "Nourriture": [
-                "150 * (pain complet * 0.5 + fromage de chèvre * 0.5) + 200 * poulet",
+                "150 * (pain_complet * 0.5 + fromage_de_chevre * 0.5) + 200 * poulet",
                 "100 * farine + 50 * sucre",
-                "10 * seven_up_mojito + 0.682* (pain complet*0.8 + poulet*0.2)",
+                "10 * seven_up_mojito + 0.682* (pain_complet*0.8 + poulet*0.2)",
                 "",  # Test empty food formula
+                "100 * caviar_d_aubergine",  # Test normalized name
             ],
             "Sport": [
                 "15*8+ 2*WALKING_CALORIES(duration_minutes=750, steps=19, incline_percent=19, weight_kg=WEIGHT) + RUNNING_CALORIES(duration_minutes=1200, distance_km=10, avg_speed_kmh=25, weight_kg=WEIGHT)",
                 "",
                 "WALKING_CALORIES(duration_minutes=3600, steps=5, incline_percent=0, weight_kg=WEIGHT)",
                 "10*10",  # Test simple sport formula
+                "",
             ],
         }
+    )
+
+    # Create the expected normalized dataframe
+    normalized_variables_df = variables_df.copy()
+    normalized_variables_df["Nom"] = normalized_variables_df["Nom"].apply(
+        normalize_food_names
     )
 
     # 2. Use `patch` to mock `pd.read_csv` and `df.to_csv`
     with (
         patch("pandas.read_csv") as mock_read_csv,
         patch("pandas.DataFrame.to_csv") as mock_to_csv,
+        patch("os.path.exists") as mock_exists,
     ):
+        # Mock os.path.exists to return True, so the script thinks
+        # normalized_variables.csv already exists.
+        mock_exists.return_value = True
+
         # Configure the mock to return different dataframes based on the file path
         def read_csv_side_effect(filepath):
             if "journal" in filepath:
                 return journal_df.copy()
-            elif "variables" in filepath:
+            elif "normalized_variables" in filepath:
+                # The script should now be reading the normalized file
+                return normalized_variables_df.copy()
+            elif "variables.csv" in filepath:
+                # This case is for completeness, though it won't be hit in this setup
                 return variables_df.copy()
             return pd.DataFrame()
 
@@ -174,7 +193,16 @@ def test_build_features_end_to_end():
     # Row 3
     weight3 = 80.1
     calories3 = (10 * 40 + 0.682 * (259 * 0.8 + 239 * 0.2)) / 100
+    proteine3 = (10 * 0 + 0.682 * (13.4 * 0.8 + 27.0 * 0.2)) / 100
+    fat3 = (10 * 0 + 0.682 * (3.2 * 0.8 + 14.0 * 0.2)) / 100
+    sfat3 = (10 * 0 + 0.682 * (0.7 * 0.8 + 3.8 * 0.2)) / 100
+    carbs3 = (10 * 10.6 + 0.682 * (41.3 * 0.8 + 0 * 0.2)) / 100
+    sugar3 = (10 * 10.6 + 0.682 * (5.4 * 0.8 + 0 * 0.2)) / 100
+    free_sugar3 = (10 * 10.6 + 0.682 * (1.0 * 0.8 + 0 * 0.2)) / 100
+    fibres3 = (10 * 0 + 0.682 * (6.0 * 0.8 + 0 * 0.2)) / 100
+    sel3 = (10 * 0.01 + 0.682 * (1.4 * 0.8 + 0.2 * 0.2)) / 100
     alcool3 = (10 * 0.5 + 0.682 * (0 * 0.8 + 0 * 0.2)) / 100
+    water3 = (10 * 88.0 + 0.682 * (35.0 * 0.8 + 60.0 * 0.2)) / 100
     sport3 = WALKING_CALORIES(
         duration_minutes=3600, steps=5, incline_percent=0, weight_kg=weight3
     )
@@ -194,6 +222,20 @@ def test_build_features_end_to_end():
         water4,
     ) = [0] * 11
     sport4 = 10 * 10
+
+    # Row 5
+    calories5 = (100 * 150) / 100
+    proteine5 = (100 * 2.0) / 100
+    fat5 = (100 * 12.0) / 100
+    sfat5 = (100 * 1.5) / 100
+    carbs5 = (100 * 5.0) / 100
+    sugar5 = (100 * 3.0) / 100
+    free_sugar5 = (100 * 0.5) / 100
+    fibres5 = (100 * 4.0) / 100
+    sel5 = (100 * 1.2) / 100
+    alcool5 = (100 * 0) / 100
+    water5 = (100 * 75.0) / 100
+    sport5 = 0
 
     # Assert calculated values are close to expected values
     expected_values = {
@@ -230,18 +272,18 @@ def test_build_features_end_to_end():
         "2024-01-03": [
             80.1,
             calories3,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
-            np.nan,
+            proteine3,
+            fat3,
+            sfat3,
+            carbs3,
+            sugar3,
+            free_sugar3,
+            fibres3,
+            sel3,
             alcool3,
-            np.nan,
+            water3,
             sport3,
-        ],  # Many NaNs because formula is incomplete
+        ],  # Formula is complete
         "2024-01-04": [
             79.9,
             calories4,
@@ -257,11 +299,27 @@ def test_build_features_end_to_end():
             water4,
             sport4,
         ],
+        "2024-01-05": [
+            79.8,
+            calories5,
+            proteine5,
+            fat5,
+            sfat5,
+            carbs5,
+            sugar5,
+            free_sugar5,
+            fibres5,
+            sel5,
+            alcool5,
+            water5,
+            sport5,
+        ],
     }
 
     for date, values in expected_values.items():
+        date_ts = pd.Timestamp(date)  # Convert string to Timestamp
         for col, expected_val in zip(expected_columns, values):
-            actual_val = result_df.loc[date, col]
+            actual_val = result_df.loc[date_ts, col]
             if pd.isna(expected_val):
                 assert pd.isna(actual_val), (
                     f"Column '{col}' for date '{date}' should be NaN"

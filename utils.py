@@ -1,11 +1,11 @@
 import unicodedata
 import ast
 import operator as op
+import pandas as pd
 
 
 FOOD_NAME_MAPPINGS = {
     "salade boulgour quinoa fruits secsm": "salade boulgour quinoa fruits secs",
-    "caviar d'aubergine": "caviar d aubergine",
 }
 
 
@@ -50,6 +50,8 @@ class SafeFormulaEvaluator(ast.NodeVisitor):
         """Handles binary operations (+, -, *, /)."""
         left = self.visit(node.left)
         right = self.visit(node.right)
+        if pd.isna(left) or pd.isna(right):
+            return pd.NA
         return self.operations[type(node.op)](left, right)
 
     def visit_UnaryOp(self, node):
@@ -60,13 +62,11 @@ class SafeFormulaEvaluator(ast.NodeVisitor):
     def visit_Name(self, node):
         """Handles variable names."""
         # Normalize the variable name by replacing underscores with spaces
-        # Normalize the variable name by replacing underscores with spaces
-        normalized_id = node.id.replace("_", " ")
-        normalized_id = FOOD_NAME_MAPPINGS.get(normalized_id, normalized_id)
+        normalized_id = FOOD_NAME_MAPPINGS.get(node.id, node.id)
 
         if normalized_id in self.context:
             return self.context[normalized_id]
-        raise NameError(f"Variable '{node.id}' is not defined.")
+        return pd.NA
 
     def visit_Call(self, node):
         """Disallow function calls for security."""

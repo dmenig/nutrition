@@ -14,16 +14,8 @@ def main():
         "Running process_nutrition_journal.py to ensure data/processed_journal.csv exists..."
     )
     script_path = "process_nutrition_journal.py"
-    try:
-        subprocess.run(
-            ["python3", script_path], check=True, capture_output=True, text=True
-        )
-        print("process_nutrition_journal.py executed successfully.")
-    except subprocess.CalledProcessError as e:
-        print(f"Error running process_nutrition_journal.py: {e}")
-        print(f"Stdout: {e.stdout}")
-        print(f"Stderr: {e.stderr}")
-        return
+    subprocess.run(["python3", script_path], check=True, capture_output=True, text=True)
+    print("process_nutrition_journal.py executed successfully.")
 
     # Normalize the variables before calculation
     print("Normalizing variables...")
@@ -38,12 +30,8 @@ def main():
         )
         return
 
-    try:
-        journal_df = pd.read_csv(processed_journal_path)
-        print(f"Successfully loaded {processed_journal_path}")
-    except Exception as e:
-        print(f"Error reading {processed_journal_path}: {e}")
-        return
+    journal_df = pd.read_csv(processed_journal_path)
+    print(f"Successfully loaded {processed_journal_path}")
 
     print("\nCalculating Kcal for all entries in processed_journal.csv:")
     # Iterate through all rows and calculate Kcal

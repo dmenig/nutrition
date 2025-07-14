@@ -91,7 +91,7 @@ def final_training(loss_weights, features_df, f_water_model_params):
     print("Final training complete. Artifacts saved.")
 
 
-if __name__ == "__main__":
+def main():
     optuna.logging.set_verbosity(optuna.logging.WARNING)
 
     df = pd.read_csv("data/processed_journal.csv")
@@ -106,3 +106,7 @@ if __name__ == "__main__":
         final_training(optimal_weights, features_df, f_water_model_params)
     else:
         print("Could not find suitable loss weights that pass sanity checks.")
+
+
+if __name__ == "__main__":
+    main()

@@ -43,14 +43,11 @@ class TestAnalysis(unittest.TestCase):
 
     def test_analyze_results_runs_without_errors(self):
         """Test that analyze_results.py runs without errors and the sanity check passes."""
-        try:
-            analyze_results()
-            # Check that plots are created
-            self.assertTrue(os.path.exists("plots/weight_overview.png"))
-            self.assertTrue(os.path.exists("plots/water_retention.png"))
-            self.assertTrue(os.path.exists("plots/metabolism.png"))
-        except Exception as e:
-            self.fail(f"analyze_results() raised an exception: {e}")
+        analyze_results()
+        # Check that plots are created
+        self.assertTrue(os.path.exists("plots/weight_overview.png"))
+        self.assertTrue(os.path.exists("plots/water_retention.png"))
+        self.assertTrue(os.path.exists("plots/metabolism.png"))
 
     def tearDown(self):
         """Clean up dummy files and directories."""

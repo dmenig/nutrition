@@ -79,8 +79,17 @@ def main():
     """
     print("--- Starting Data Processing ---")
 
-    # Load data and calculate nutritional features
-    features_df = data_processor.load_and_process_data()
+    # Normalize variables before processing
+    data_processor.save_normalized_variables(
+        variables_path="data/variables.csv",
+        normalized_path="data/normalized_variables.csv",
+    )
+
+    # Load data and calculate nutritional features using the normalized variables
+    features_df = data_processor.load_and_process_data(
+        journal_path="data/processed_journal.csv",
+        variables_path="data/normalized_variables.csv",
+    )
 
     # Build features
     features_df = build_features(features_df)

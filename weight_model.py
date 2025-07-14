@@ -110,7 +110,14 @@ class WeightModel:
         if len(historical_X_list) > 1:
             historical_X = pd.concat(historical_X_list, ignore_index=True)
             historical_y = pd.Series(historical_y_list)
-            self.f_water_model.fit(historical_X, historical_y)
+
+            # Drop NaN values
+            valid_indices = ~historical_y.isna()
+            historical_X = historical_X[valid_indices]
+            historical_y = historical_y[valid_indices]
+
+            if not historical_X.empty:
+                self.f_water_model.fit(historical_X, historical_y)
 
     def run(self, data_df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -160,6 +167,8 @@ class WeightModel:
             )
             C_in_t = data_df.loc[t, "calories"]
             C_exp_t = M_t + data_df.loc[t, "sport"]
+            results_list[t - 1]["C_in_t"] = C_in_t_minus_1
+            results_list[t - 1]["C_exp_t"] = C_exp_t_minus_1
 
             results_df = pd.DataFrame(results_list)
             X_t = self._prepare_f_water_features(t, data_df, results_df)

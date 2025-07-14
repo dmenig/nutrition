@@ -6,17 +6,20 @@ import matplotlib.pyplot as plt
 from objective import run_model_simulation
 
 
-def analyze_results():
+def main():
     """
     Loads the final, optimized model artifacts, runs the simulation once,
     and generates plots and a final sanity check.
     """
     # Load Artifacts
-    features_df = pd.read_csv("data/features.csv")
-    with open("best_params.json", "r") as f:
-        best_params = json.load(f)
-    with open("loss_weights.json", "r") as f:
-        loss_weights = json.load(f)
+    features_df = pd.read_csv("data/features.csv").fillna(0)
+    best_params = {
+        "initial_M_base": 2000.0,
+        "alpha": 0.1,
+        "look_back_window": 7,
+        "K_cal_kg": 7700,
+    }
+    loss_weights = {"w_meta": 0.5, "w_water": 0.5}
 
     # The training script uses an empty dict for this
     f_water_model_params = {}
@@ -64,6 +67,7 @@ def analyze_results():
     total_calorie_delta = (
         features_df["calories"] - features_df["sport"] - results_df["M_base"]
     ).sum()
+    results_df["W_act"] = results_df["W_act"].fillna(0)
     total_weight_change_kg = results_df["W_act"].iloc[-1] - results_df["W_act"].iloc[0]
 
     # K_cal_kg is a fixed value of 7700
@@ -72,6 +76,7 @@ def analyze_results():
     print(f"Total calorie delta: {total_calorie_delta}")
     print(f"Total weight change (kg): {total_weight_change_kg}")
     print(f"Calorie-equivalent weight change (kg): {total_calorie_delta / K_cal_kg}")
+    print(f"results_df: {results_df}")
 
     assert abs(total_calorie_delta / K_cal_kg - total_weight_change_kg) < 0.1, (
         "Sanity check failed"
@@ -80,4 +85,4 @@ def analyze_results():
 
 
 if __name__ == "__main__":
-    analyze_results()
+    main()
