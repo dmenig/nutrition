@@ -2,6 +2,8 @@ import pytest
 import os
 import csv
 from nutrition_calculator import calculate_nutrient_from_formula
+from data_processor import save_normalized_variables
+import pandas as pd
 
 # Define the path for the temporary variables.csv file
 TEMP_VARIABLES_CSV = "tests/temp_variables.csv"
@@ -161,3 +163,41 @@ def test_interchangeable_spaces_and_underscores(setup_teardown_variables_csv):
     formula = "Pomme_verte * 100"
     result_kcal = calculate_nutrient_from_formula(formula, "Kcal", TEMP_VARIABLES_CSV)
     assert result_kcal == pytest.approx(6000.0)
+
+
+def test_normalization_and_calculation():
+    # 1. Create a dummy variables.csv for testing
+    variables_data = {
+        "Nom": ["Caviar d'aubergine", "Autre chose"],
+        "Calories / 100g": [150, 200],
+        "Proteines / 100g": [5, 10],
+    }
+    variables_df = pd.DataFrame(variables_data)
+    os.makedirs("data", exist_ok=True)
+    variables_csv_path = "data/variables.csv"
+    variables_df.to_csv(variables_csv_path, index=False)
+
+    # 2. Run the normalization process
+    save_normalized_variables()
+
+    # 3. Check if the normalized file was created correctly
+    normalized_csv_path = "data/normalized_variables.csv"
+    assert os.path.exists(normalized_csv_path)
+
+    normalized_df = pd.read_csv(normalized_csv_path)
+    expected_names = ["caviar_d_aubergine", "autre_chose"]
+    assert normalized_df["Nom"].tolist() == expected_names
+
+    # 4. Test the calculation with a formula using the un-normalized name
+    formula = "100 * caviar_d_aubergine"
+
+    # We need to use the normalized file for calculation
+    calculated_kcal = calculate_nutrient_from_formula(
+        formula, "Calories / 100g", variables_file_path=normalized_csv_path
+    )
+
+    assert calculated_kcal == 15000.0
+
+    # 5. Clean up the dummy files
+    os.remove(variables_csv_path)
+    os.remove(normalized_csv_path)

@@ -126,3 +126,34 @@ if __name__ == "__main__":
         print("You might need to run 'python3 process_nutrition_journal.py' first.")
     except Exception as e:
         print(f"An error occurred during data processing: {e}")
+
+
+def save_normalized_variables(
+    variables_path="data/variables.csv",
+    normalized_path="data/normalized_variables.csv",
+):
+    """
+    Reads the variables CSV, normalizes the 'Nom' column to be valid Python
+    identifiers, and saves the result to a new CSV file.
+
+    Normalization includes:
+    - Stripping accents.
+    - Converting to lowercase.
+    - Replacing spaces and special characters with underscores.
+    """
+    if not os.path.exists(variables_path):
+        raise FileNotFoundError(f"Variables file not found: {variables_path}")
+
+    variables_df = pd.read_csv(variables_path)
+
+    # Normalize the 'Nom' column
+    variables_df["Nom"] = (
+        variables_df["Nom"]
+        .apply(strip_accents)
+        .str.lower()
+        .str.replace(r"[^a-zA-Z0-9_]+", "_", regex=True)
+    )
+
+    # Save the normalized DataFrame
+    variables_df.to_csv(normalized_path, index=False)
+    print(f"Normalized variables saved to {normalized_path}")

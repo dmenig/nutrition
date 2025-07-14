@@ -17,6 +17,7 @@ def evaluate_weight_cell(pds_cell, sheet_values):
     """
     if pds_cell.data_type == "f":  # It's a formula
         formula = pds_cell.value
+        print(f"Evaluating formula: {formula}")
         expression = formula.lstrip("=")
 
         # Find all cell references (e.g., A1, $B$2)
@@ -33,12 +34,15 @@ def evaluate_weight_cell(pds_cell, sheet_values):
         try:
             evaluator = SafeFormulaEvaluator()
             node = ast.parse(expression, mode="eval").body
-            return evaluator.visit(node)
+            result = evaluator.visit(node)
+            print(f"Formula evaluated to: {result}")
+            return result
         except (SyntaxError, NameError, TypeError, ValueError) as e:
             print(f"Could not evaluate formula {formula}: {e}")
+            print("Falling back to formula string.")
             return pds_cell.value  # Fallback to the formula string on error
     else:  # It's a direct value
-        return pds_cell.value
+        return float(pds_cell.value)
 
 
 def resolve_excel_references_in_sport_expression(
@@ -121,8 +125,9 @@ def process_nutrition_journal():
                 first_date_found = True
         elif current_date:
             current_date += timedelta(days=1)
-
         pds_cell = row_formulas[pds_col_idx]
+        if current_date < pd.to_datetime("2024-06-30").date() or pds_cell.value is None:
+            continue
         pds_value = evaluate_weight_cell(pds_cell, sheet_values)
         data.append(
             {

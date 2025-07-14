@@ -1,4 +1,5 @@
 from nutrition_calculator import calculate_nutrient_from_formula
+from data_processor import save_normalized_variables
 import subprocess
 import pandas as pd
 import os
@@ -24,6 +25,11 @@ def main():
         print(f"Stderr: {e.stderr}")
         return
 
+    # Normalize the variables before calculation
+    print("Normalizing variables...")
+    save_normalized_variables()
+    print("Normalization complete.")
+
     # Read the processed_journal.csv file
     processed_journal_path = os.path.join("data", "processed_journal.csv")
     if not os.path.exists(processed_journal_path):
@@ -39,20 +45,15 @@ def main():
         print(f"Error reading {processed_journal_path}: {e}")
         return
 
-    print("\nCalculating Kcal for the first 5 entries in processed_journal.csv:")
-    # Iterate through the first 5 rows and calculate Kcal
-    for index, row in journal_df.head(5).iterrows():
+    print("\nCalculating Kcal for all entries in processed_journal.csv:")
+    # Iterate through all rows and calculate Kcal
+    for index, row in journal_df.iterrows():
         formula = row["Nourriture"]
         if pd.isna(formula):
-            print(
-                f"Row {index + 1}: No formula found in 'Nourriture' column. Skipping."
+            raise ValueError(
+                f"Empty formula found at row {index + 2}. Please check the data quality of 'processed_journal.csv'."
             )
-            continue
-
-        calculated_kcal = calculate_nutrient_from_formula(
-            str(formula), "Calories / 100g"
-        )
-        print(f"Formula: '{formula}' -> Kcal: {calculated_kcal:.2f}")
+        _ = calculate_nutrient_from_formula(str(formula), "Calories / 100g")
 
 
 if __name__ == "__main__":
