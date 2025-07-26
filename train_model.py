@@ -56,7 +56,7 @@ class FinalModel(nn.Module):
             combined_input = torch.cat((current_gru_out, current_nutrition), dim=-1)
             
             # Predict metabolism increment for smoothness
-            metabolism_increment = torch.tanh(self.metabolism_increment_head(combined_input)) * 0.05
+            metabolism_increment = torch.tanh(self.metabolism_increment_head(combined_input)) * 0.075 # Max 75 kcal change/day
             current_metabolism = current_metabolism + metabolism_increment
             base_metabolisms.append(current_metabolism)
             
