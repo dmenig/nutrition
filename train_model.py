@@ -11,7 +11,7 @@ K_cal_kg = 7700
 
 
 class FinalModel(nn.Module):
-    def __init__(self, nutrition_input_size, initial_weight_guess, hidden_size=64, num_layers=2):
+    def __init__(self, nutrition_input_size, initial_weight_guess, hidden_size=128, num_layers=2):
         super(FinalModel, self).__init__()
         
         self.gru = nn.GRU(
@@ -29,16 +29,16 @@ class FinalModel(nn.Module):
         
         # Head to predict the daily *increment* for metabolism
         self.metabolism_increment_head = nn.Sequential(
-            nn.Linear(head_input_size, 32),
+            nn.Linear(head_input_size, 64),
             nn.ReLU(),
-            nn.Linear(32, 1)
+            nn.Linear(64, 1)
         )
         
         # Head to predict water retention
         self.water_retention_head = nn.Sequential(
-            nn.Linear(head_input_size, 32),
+            nn.Linear(head_input_size, 64),
             nn.ReLU(),
-            nn.Linear(32, 1)
+            nn.Linear(64, 1)
         )
 
     def forward(self, nutrition_data):
@@ -56,7 +56,7 @@ class FinalModel(nn.Module):
             combined_input = torch.cat((current_gru_out, current_nutrition), dim=-1)
             
             # Predict metabolism increment for smoothness
-            metabolism_increment = torch.tanh(self.metabolism_increment_head(combined_input)) * 0.075 # Max 75 kcal change/day
+            metabolism_increment = torch.tanh(self.metabolism_increment_head(combined_input)) * 0.1 # Max 100 kcal change/day
             current_metabolism = current_metabolism + metabolism_increment
             base_metabolisms.append(current_metabolism)
             
@@ -105,14 +105,17 @@ def calculate_loss(
     predicted_observed_weight,
     predicted_water_retentions,
 ):
-    # Loss component 1: Match the observed weight
-    loss_fit = torch.mean((predicted_observed_weight - observed_weights) ** 2)
+    # Loss component 1: Match the observed weight, with a gentle weight on recent data
+    seq_len = observed_weights.shape[1]
+    time_weights = torch.linspace(0.8, 1.2, steps=seq_len, device=observed_weights.device).unsqueeze(0)
+    squared_errors = (predicted_observed_weight - observed_weights) ** 2
+    loss_fit = torch.mean(squared_errors * time_weights)
     
     # Loss component 2: Penalize non-zero mean water retention
     loss_wr_mean = torch.mean(predicted_water_retentions) ** 2
     
     # Combine losses with a weight for the mean penalty
-    total_loss = loss_fit + 1.0 * loss_wr_mean
+    total_loss = loss_fit + 5.0 * loss_wr_mean
     
     return total_loss, {
         "loss_fit": loss_fit.item(),
@@ -148,10 +151,10 @@ def main():
     # Model, Optimizer
     initial_weight_guess = observed_weights[:, :5].mean().item()
     model = FinalModel(nutrition_data.shape[2], initial_weight_guess)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.01) # Increased learning rate
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.01, weight_decay=1e-4) # Increased LR, added weight decay
 
     print("Starting training with Final, Stable Model...")
-    for epoch in range(500):
+    for epoch in range(600):
         optimizer.zero_grad()
 
         base_metabolisms, water_retentions = model(nutrition_data)
