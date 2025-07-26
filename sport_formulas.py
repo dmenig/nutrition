@@ -10,36 +10,45 @@ MET_VALUES: Dict[str, float] = {
 
 
 def WALKING_CALORIES(
-    duration_minutes: float, steps: float, incline_percent: float, weight_kg: float
+    duration_minutes: float,
+    weight_kg: float,
+    distance_meters: float,
+    additional_weight_kg: float,
 ) -> float:
     """
     Calculates the calories burned during walking.
-    The parameters 'steps' and 'incline_percent' are placeholders.
+    The parameters 'distance_meters' and 'additional_weight_kg' are placeholders.
     """
     met_value = MET_VALUES.get("walking", 3.5)
-    return (met_value * 3.5 * weight_kg) / 200 * duration_minutes
+    return met_value * weight_kg * (duration_minutes / 60.0)
 
 
 def RUNNING_CALORIES(
-    duration_minutes: float, distance_km: float, avg_speed_kmh: float, weight_kg: float
+    duration_minutes: float,
+    weight_kg: float,
+    distance_meters: float,
+    additional_weight_kg: float,
 ) -> float:
     """
     Calculates the calories burned from running.
-    The parameters 'distance_km' and 'avg_speed_kmh' are placeholders.
+    The parameters 'distance_meters' and 'additional_weight_kg' are placeholders.
     """
     met_value = MET_VALUES.get("running", 10.0)
-    return (met_value * 3.5 * weight_kg) / 200 * duration_minutes
+    return met_value * weight_kg * (duration_minutes / 60.0)
 
 
 def CYCLING_CALORIES(
-    duration_minutes: float, distance_km: float, avg_speed_kmh: float, weight_kg: float
+    duration_minutes: float,
+    weight_kg: float,
+    distance_meters: float,
+    additional_weight_kg: float,
 ) -> float:
     """
     Calculates the calories burned from cycling.
-    The parameters 'distance_km' and 'avg_speed_kmh' are placeholders.
+    The parameters 'distance_meters' and 'additional_weight_kg' are placeholders.
     """
     met_value = MET_VALUES.get("cycling", 8.0)
-    return (met_value * 3.5 * weight_kg) / 200 * duration_minutes
+    return met_value * weight_kg * (duration_minutes / 60.0)
 
 
 # Whitelist of functions that can be called from the sport formula.

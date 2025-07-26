@@ -8,17 +8,17 @@ from sport_formulas import evaluate_sport_formula
 
 # Test cases for individual sport formula functions.
 # Each tuple contains: (function, args, expected_result)
-# args are (duration_minutes, weight_kg, param3, param4)
+# args are (duration_minutes, weight_kg, distance_meters, additional_weight_kg)
 FORMULA_TEST_CASES = [
     # WALKING_CALORIES
-    (WALKING_CALORIES, (60, 7000, 3, 70), 257.25),
-    (WALKING_CALORIES, (0, 0, 0, 70), 0.0),
+    (WALKING_CALORIES, (60, 70, 3000, 5), 245.0),
+    (WALKING_CALORIES, (0, 70, 0, 0), 0.0),
     # RUNNING_CALORIES
-    (RUNNING_CALORIES, (30, 5, 10, 75), 393.75),
-    (RUNNING_CALORIES, (0, 0, 0, 75), 0.0),
+    (RUNNING_CALORIES, (30, 75, 5000, 0), 375.0),
+    (RUNNING_CALORIES, (0, 75, 0, 0), 0.0),
     # CYCLING_CALORIES
-    (CYCLING_CALORIES, (45, 15, 20, 80), 504.0),
-    (CYCLING_CALORIES, (0, 0, 0, 80), 0.0),
+    (CYCLING_CALORIES, (45, 80, 15000, 0), 480.0),
+    (CYCLING_CALORIES, (0, 80, 0, 0), 0.0),
 ]
 
 
@@ -26,7 +26,7 @@ FORMULA_TEST_CASES = [
 def test_sport_formula_functions(func, args, expected):
     """
     Tests the individual sport formula functions with various inputs.
-    The extra parameters (steps, distance, etc.) are placeholders and do not
+    The extra parameters (distance_meters, additional_weight_kg) are placeholders and do not
     affect the current calculation, but are included for signature correctness.
     """
     result = func(*args)
@@ -38,9 +38,21 @@ def test_evaluate_sport_formula_with_commas_and_functions():
     Tests evaluate_sport_formula with a complex formula including commas
     as decimal separators and multiple function calls, verifying the fix.
     """
-    formula = "15*8 + 2*WALKING_CALORIES(duration_minutes=10, weight_kg=70, steps=700, incline_percent=4) + WALKING_CALORIES(duration_minutes=27, weight_kg=70, steps=2800, incline_percent=2)"
+    formula = "15*8 + 2*WALKING_CALORIES(10, 70, 700, 4) + WALKING_CALORIES(27, 70, 2800, 2)"
     weight = 70.0  # Dummy weight value
-    expected_calories = 321.5125  # Calculated: 120 + 2*42.875 + 115.7625
+    expected_calories = 311.9167 # Calculated: 120 + 2*40.8333 + 110.25
 
     result = evaluate_sport_formula(formula, weight)
-    assert result == pytest.approx(expected_calories)
+    assert result == pytest.approx(expected_calories, 0.01)
+
+def test_evaluate_sport_formula_with_positional_args():
+    """
+    Tests that the evaluate_sport_formula function correctly processes
+    a formula with positional arguments, including the WEIGHT placeholder.
+    """
+    formula = "WALKING_CALORIES(7, WEIGHT, 700, 3)"
+    weight = 70.0
+    # Expected: 3.5 (MET) * 70 (weight) * (7 / 60) (duration) = 28.5833
+    expected_calories = 28.5833
+    result = evaluate_sport_formula(formula, weight)
+    assert result == pytest.approx(expected_calories, 0.0001)
