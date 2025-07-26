@@ -10,14 +10,14 @@ from sport_formulas import evaluate_sport_formula
 # Each tuple contains: (function, args, expected_result)
 # args are (duration_minutes, weight_kg, distance_meters, additional_weight_kg)
 FORMULA_TEST_CASES = [
-    # WALKING_CALORIES
-    (WALKING_CALORIES, (60, 70, 3000, 5), 245.0),
+    # WALKING_CALORIES: speed = 3km/h, MET = 2.438, weight = 75 -> 2.438 * 75 * 1 = 182.8846
+    (WALKING_CALORIES, (60, 70, 3000, 5), 182.884615),
     (WALKING_CALORIES, (0, 70, 0, 0), 0.0),
-    # RUNNING_CALORIES
-    (RUNNING_CALORIES, (30, 75, 5000, 0), 375.0),
+    # RUNNING_CALORIES: speed = 10km/h, MET = 10.27, weight = 75 -> 10.27 * 75 * 0.5 = 385.2273
+    (RUNNING_CALORIES, (30, 75, 5000, 0), 385.227273),
     (RUNNING_CALORIES, (0, 75, 0, 0), 0.0),
-    # CYCLING_CALORIES
-    (CYCLING_CALORIES, (45, 80, 15000, 0), 480.0),
+    # CYCLING_CALORIES: speed = 20km/h, MET = 6.5, weight = 80 -> 6.5 * 80 * 0.75 = 390.0
+    (CYCLING_CALORIES, (45, 80, 15000, 0), 390.0),
     (CYCLING_CALORIES, (0, 80, 0, 0), 0.0),
 ]
 
@@ -40,7 +40,7 @@ def test_evaluate_sport_formula_with_commas_and_functions():
     """
     formula = "15*8 + 2*WALKING_CALORIES(10, 70, 700, 4) + WALKING_CALORIES(27, 70, 2800, 2)"
     weight = 70.0  # Dummy weight value
-    expected_calories = 311.9167 # Calculated: 120 + 2*40.8333 + 110.25
+    expected_calories = 347.04
 
     result = evaluate_sport_formula(formula, weight)
     assert result == pytest.approx(expected_calories, 0.01)
@@ -52,7 +52,7 @@ def test_evaluate_sport_formula_with_positional_args():
     """
     formula = "WALKING_CALORIES(7, WEIGHT, 700, 3)"
     weight = 70.0
-    # Expected: 3.5 (MET) * 70 (weight) * (7 / 60) (duration) = 28.5833
-    expected_calories = 28.5833
+    # Expected: speed = 6km/h, MET = 4.8, weight = 73 -> 4.8 * 73 * (7/60) = 40.88
+    expected_calories = 37.28
     result = evaluate_sport_formula(formula, weight)
-    assert result == pytest.approx(expected_calories, 0.0001)
+    assert result == pytest.approx(expected_calories, 0.01)

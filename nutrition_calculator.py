@@ -49,9 +49,7 @@ def calculate_nutrient_from_formula_with_context(
     # Evaluate the AST using the safe evaluator with the prepared context
     evaluator = SafeFormulaEvaluator(context=nutrient_context)
     result = evaluator.visit(node.body)
-    if nutrient == "Calories / 100g":
-        return result
-    return result / 100
+    return result
 
 
 def calculate_nutrient_from_formula(

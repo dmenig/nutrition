@@ -12,13 +12,15 @@ def calculate_sport_calories(row: pd.Series) -> float:
 
     Args:
         row: A pandas Series representing a row of the DataFrame.
-             It must contain 'Sport' and 'Pds' columns.
+             It must contain 'Sport', 'Pds', 'distance', and 'duration' columns.
 
     Returns:
         The calculated calories burned, or 0 if the formula is invalid.
     """
     sport_formula = row["Sport"]
     weight = row["Pds"]
+    distance = row.get("distance", 0.0)
+    duration = row.get("duration", 0.0)
 
     if not isinstance(sport_formula, str) or not sport_formula.strip():
         return 0.0
@@ -27,9 +29,12 @@ def calculate_sport_calories(row: pd.Series) -> float:
     node = ast.parse(sport_formula, mode="eval")
 
     # Prepare the context for the formula evaluator
-    # It needs the sport functions and the current weight
+    # It needs the sport functions and the current weight, distance, and duration
     context = sport_formulas.SPORT_FUNCTIONS.copy()
     context["WEIGHT"] = weight
+    context["distance_meters"] = distance
+    context["duration_minutes"] = duration
+    context["additional_weight_kg"] = 0  # Placeholder for now
 
     # Evaluate the formula
     evaluator = SafeSportFormulaEvaluator(context)
