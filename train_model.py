@@ -56,7 +56,7 @@ class FinalModel(nn.Module):
             combined_input = torch.cat((current_gru_out, current_nutrition), dim=-1)
             
             # Predict metabolism increment for smoothness
-            metabolism_increment = torch.tanh(self.metabolism_increment_head(combined_input)) * 0.1 # Max 100 kcal change/day
+            metabolism_increment = torch.tanh(self.metabolism_increment_head(combined_input)) * 0.125 # Max 125 kcal change/day
             current_metabolism = current_metabolism + metabolism_increment
             base_metabolisms.append(current_metabolism)
             
@@ -115,7 +115,7 @@ def calculate_loss(
     loss_wr_mean = torch.mean(predicted_water_retentions) ** 2
     
     # Combine losses with a weight for the mean penalty
-    total_loss = loss_fit + 5.0 * loss_wr_mean
+    total_loss = loss_fit + 50.0 * loss_wr_mean
     
     return total_loss, {
         "loss_fit": loss_fit.item(),
