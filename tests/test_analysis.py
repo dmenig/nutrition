@@ -2,7 +2,7 @@ import unittest
 import os
 import pandas as pd
 import json
-from analyze_results import analyze_results
+from analyze_results import main as analyze_results
 
 
 class TestAnalysis(unittest.TestCase):

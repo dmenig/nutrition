@@ -1,5 +1,18 @@
-*.json
-*.csv
-*.xlsx
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
 .venv/
-*.pyc
+venv/
+env/
+
+# Data and model outputs
+data/
+*.pth
+*.png
+best_params.json
+loss_weights.json
+sensitivity_analysis.png
+model_analysis_plots.png

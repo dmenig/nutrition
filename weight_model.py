@@ -123,75 +123,73 @@ class WeightModel:
         """
         The core simulation loop.
         """
-        results_list = []
-        M_t = self.initial_M_base
-
-        W_act_t = data_df.loc[0, "pds"]
-        C_in_t = data_df.loc[0, "calories"]
-        C_exp_t = M_t + data_df.loc[0, "sport"]
-
-        results_list.append(
-            {
-                "t": 0,
-                "C_in_t": C_in_t,
-                "C_exp_t": C_exp_t,
-                "M_t": M_t,
-                "W_act_t": W_act_t,
-                "WR_t": 0,
-                "W_pred_t": W_act_t,
-                "W_obs_t": data_df.loc[0, "pds"],
-            }
+        num_days = len(data_df)
+        results = np.zeros(
+            num_days,
+            dtype=[
+                ("t", "i4"),
+                ("C_in_t", "f8"),
+                ("C_exp_t", "f8"),
+                ("M_base", "f8"),
+                ("W_act", "f8"),
+                ("WR_t", "f8"),
+                ("W_pred_t", "f8"),
+                ("W_obs_t", "f8"),
+            ],
         )
 
-        for t in range(1, len(data_df)):
-            prev_result = results_list[t - 1]
-            C_in_t_minus_1 = prev_result["C_in_t"]
-            C_exp_t_minus_1 = prev_result["C_exp_t"]
-            M_t_minus_1 = prev_result["M_t"]
-            W_act_t_minus_1 = prev_result["W_act_t"]
+        # Initialize base arrays
+        calories_in = data_df["calories"].values
+        sport_exp = data_df["sport"].values
+        w_obs = data_df["pds"].values
 
-            W_obs_t = data_df.loc[t, "pds"]
-            W_obs_t_minus_1 = data_df.loc[t - 1, "pds"]
+        # Set initial values
+        results["t"] = np.arange(num_days)
+        results["W_obs_t"] = w_obs
+        results["W_act"][0] = w_obs[0]
+        results["M_base"][0] = self.initial_M_base
+        results["C_in_t"][0] = calories_in[0]
+        results["C_exp_t"][0] = results["M_base"][0] + sport_exp[0]
+        results["W_pred_t"][0] = results["W_act"][0]
 
-            W_act_t = (
-                W_act_t_minus_1 + (C_in_t_minus_1 - C_exp_t_minus_1) / self.K_cal_kg
-            )
-            M_t = (
+        # Iterative calculation of metabolism and weight
+        for t in range(1, num_days):
+            # Correctly calculate M_base for day t using rearranged formula
+            m_base_t_minus_1 = results["M_base"][t - 1]
+            c_in_t = calories_in[t]
+            sport_exp_t = sport_exp[t]
+            w_obs_t = w_obs[t]
+            w_obs_t_minus_1 = w_obs[t - 1]
+
+            numerator = (
                 self.alpha
-                * (
-                    C_in_t_minus_1
-                    - C_exp_t_minus_1
-                    - (W_obs_t - W_obs_t_minus_1) * self.K_cal_kg
+                * (c_in_t - sport_exp_t - (w_obs_t - w_obs_t_minus_1) * self.K_cal_kg)
+                + (1 - self.alpha) * m_base_t_minus_1
+            )
+            denominator = 1 + self.alpha
+            results["M_base"][t] = numerator / denominator
+
+            # Update energy expenditure for day t
+            results["C_in_t"][t] = c_in_t
+            results["C_exp_t"][t] = results["M_base"][t] + sport_exp[t]
+
+            # Update actual weight for day t based on previous day's balance
+            calorie_delta_t_minus_1 = (
+                results["C_in_t"][t - 1] - results["C_exp_t"][t - 1]
+            )
+            results["W_act"][t] = (
+                results["W_act"][t - 1] + calorie_delta_t_minus_1 / self.K_cal_kg
+            )
+
+        # Water retention and final prediction
+        if self.f_water_model.is_fitted:
+            temp_results_df = pd.DataFrame(results)
+            for t in range(1, num_days):
+                X_t = self._prepare_f_water_features(
+                    t, data_df, temp_results_df, w_act_col="W_act"
                 )
-                + (1 - self.alpha) * M_t_minus_1
-            )
-            C_in_t = data_df.loc[t, "calories"]
-            C_exp_t = M_t + data_df.loc[t, "sport"]
-            results_list[t - 1]["C_in_t"] = C_in_t_minus_1
-            results_list[t - 1]["C_exp_t"] = C_exp_t_minus_1
+                if X_t is not None:
+                    results["WR_t"][t] = self.f_water_model.predict(X_t)[0]
 
-            results_df = pd.DataFrame(results_list)
-            X_t = self._prepare_f_water_features(t, data_df, results_df)
-
-            WR_t = 0
-            if X_t is not None and self.f_water_model.is_fitted:
-                WR_t = self.f_water_model.predict(X_t)[0]
-
-            W_pred_t = W_act_t + WR_t
-
-            results_list.append(
-                {
-                    "t": t,
-                    "C_in_t": C_in_t,
-                    "C_exp_t": C_exp_t,
-                    "M_t": M_t,
-                    "W_act_t": W_act_t,
-                    "WR_t": WR_t,
-                    "W_pred_t": W_pred_t,
-                    "W_obs_t": W_obs_t,
-                }
-            )
-
-        results_df = pd.DataFrame(results_list)
-        results_df.rename(columns={"M_t": "M_base", "W_act_t": "W_act"}, inplace=True)
-        return results_df
+        results["W_pred_t"] = results["W_act"] + results["WR_t"]
+        return pd.DataFrame(results)

@@ -38,6 +38,15 @@ def test_training_script_runs_and_creates_artifacts():
     assert os.path.exists(loss_weights_path), f"'{loss_weights_path}' was not created."
     assert os.path.exists(results_path), f"'{results_path}' was not created."
 
+    # Load the JSON files and check they are not empty
+    with open(best_params_path, "r") as f:
+        best_params = json.load(f)
+    assert best_params, f"'{best_params_path}' is empty."
+
+    with open(loss_weights_path, "r") as f:
+        loss_weights = json.load(f)
+    assert loss_weights, f"'{loss_weights_path}' is empty."
+
     # Optional: Clean up the created artifacts after the test
     os.remove(best_params_path)
     os.remove(loss_weights_path)
