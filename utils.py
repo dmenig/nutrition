@@ -62,11 +62,14 @@ class SafeFormulaEvaluator(ast.NodeVisitor):
     def visit_Name(self, node):
         """Handles variable names."""
         # Normalize the variable name by replacing underscores with spaces
-        normalized_id = FOOD_NAME_MAPPINGS.get(node.id, node.id)
+        if node.id == "WEIGHT":
+            return self.context["WEIGHT"]
+        normalized_id = strip_accents(node.id.lower()).replace(" ", "_").replace("'", "_")
+        normalized_id = FOOD_NAME_MAPPINGS.get(normalized_id, normalized_id)
 
         if normalized_id in self.context:
             return self.context[normalized_id]
-        return pd.NA
+        raise ValueError(f"Name '{node.id}' is not defined in the given context.")
 
     def visit_Call(self, node):
         """Disallow function calls for security."""

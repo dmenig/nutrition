@@ -80,7 +80,7 @@ def test_food_item_not_in_variables_file(setup_teardown_variables_csv):
     formula = "Orange * 100"
     with pytest.raises(
         ValueError,
-        match=r"Name 'orange' is not defined in the given context.",
+        match=r"Name 'Orange' is not defined in the given context.",
     ):
         calculate_nutrient_from_formula(formula, "Kcal", TEMP_VARIABLES_CSV)
 
@@ -154,8 +154,6 @@ def test_formula_with_underscores_in_food_name(setup_teardown_variables_csv):
 def test_interchangeable_spaces_and_underscores(setup_teardown_variables_csv):
     """
     Tests that food names with spaces and underscores are handled interchangeably.
-
-    This test is expected to fail.
 
     Formula: "Pomme_verte * 100"
     Expected Kcal: 60 * 100 = 6000 (from "Pomme verte" in CSV)

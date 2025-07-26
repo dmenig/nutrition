@@ -123,7 +123,7 @@ SPORT_FUNCTIONS = {
 }
 
 
-def evaluate_sport_formula(formula: str, weight: float) -> float:
+def evaluate_sport_formula(formula: str) -> float:
     """
     Evaluates a sport formula string.
     """
@@ -132,7 +132,6 @@ def evaluate_sport_formula(formula: str, weight: float) -> float:
 
     # Prepare the context for safe evaluation
     context = {
-        "WEIGHT": weight,
         **SPORT_FUNCTIONS,
     }
 

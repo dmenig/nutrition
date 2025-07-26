@@ -39,20 +39,19 @@ def test_evaluate_sport_formula_with_commas_and_functions():
     as decimal separators and multiple function calls, verifying the fix.
     """
     formula = "15*8 + 2*WALKING_CALORIES(10, 70, 700, 4) + WALKING_CALORIES(27, 70, 2800, 2)"
-    weight = 70.0  # Dummy weight value
     expected_calories = 347.04
 
-    result = evaluate_sport_formula(formula, weight)
-    assert result == pytest.approx(expected_calories, 0.01)
+    result = evaluate_sport_formula(formula)
+    assert result == pytest.approx(expected_calories, rel=1e-2)
+
 
 def test_evaluate_sport_formula_with_positional_args():
     """
     Tests that the evaluate_sport_formula function correctly processes
     a formula with positional arguments, including the WEIGHT placeholder.
     """
-    formula = "WALKING_CALORIES(7, WEIGHT, 700, 3)"
-    weight = 70.0
+    formula = "WALKING_CALORIES(7, 70, 700, 3)"
     # Expected: speed = 6km/h, MET = 4.8, weight = 73 -> 4.8 * 73 * (7/60) = 40.88
-    expected_calories = 37.28
-    result = evaluate_sport_formula(formula, weight)
-    assert result == pytest.approx(expected_calories, 0.01)
+    expected_calories = 37.284
+    result = evaluate_sport_formula(formula)
+    assert result == pytest.approx(expected_calories, rel=1e-2)
