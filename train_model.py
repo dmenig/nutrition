@@ -115,7 +115,7 @@ def calculate_loss(
     loss_wr_mean = torch.mean(predicted_water_retentions) ** 2
     
     # Combine losses with a weight for the mean penalty
-    total_loss = loss_fit + 50.0 * loss_wr_mean
+    total_loss = loss_fit + 5.0 * loss_wr_mean
     
     return total_loss, {
         "loss_fit": loss_fit.item(),
@@ -151,7 +151,7 @@ def main():
     # Model, Optimizer
     initial_weight_guess = observed_weights[:, :5].mean().item()
     model = FinalModel(nutrition_data.shape[2], initial_weight_guess)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.01, weight_decay=1e-4) # Increased LR, added weight decay
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001) # Increased LR, added weight decay
 
     print("Starting training with Final, Stable Model...")
     for epoch in range(600):

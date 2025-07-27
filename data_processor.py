@@ -3,7 +3,6 @@ import numpy as np
 import os
 import re
 from nutrition_calculator import (
-    calculate_nutrient_from_formula,
     get_nutrient_context,
     calculate_nutrient_from_formula_with_context,
 )

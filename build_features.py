@@ -48,15 +48,11 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     print("--- Starting Feature Building ---")
 
     # Specifically rename 'calories_/_100g' to 'calories'
-    if "calories_/_100g" in df.columns:
-        df.rename(columns={"calories_/_100g": "calories"}, inplace=True)
+    df.rename(columns={"Calories / 100g": "calories"}, inplace=True)
 
     # Calculate sport calories and handle original 'Sport' column
-    if "Sport" in df.columns and "Pds" in df.columns:
-        df["sport"] = df.apply(calculate_sport_calories, axis=1)
-        df.drop(columns=["Sport"], inplace=True)
-    else:
-        df["sport"] = 0.0
+    df["sport"] = df.apply(calculate_sport_calories, axis=1)
+    df.drop(columns=["Sport"], inplace=True)
 
     # Clean and format all column names
     new_columns = {}
@@ -65,14 +61,6 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         new_columns[col] = new_col
     df.rename(columns=new_columns, inplace=True)
 
-    # Ensure 'calories' column exists, if not, create it with 0s
-    if "calories" not in df.columns:
-        df["calories"] = 0
-
-    # Ensure other required columns exist
-    for col in ["carbs", "sugar", "sel", "alcool", "water"]:
-        if col not in df.columns:
-            df[col] = 0
 
     print("--- Feature Building Complete ---")
     return df
