@@ -20,8 +20,7 @@ def get_nutrient_context(nutrient: str, variables_df: pd.DataFrame) -> dict:
         food_name = str(row["Nom"])
         # Normalize the food name before adding it to the context
         normalized_food_name = normalize_food_names(food_name)
-        if nutrient in row and pd.notna(row[nutrient]):
-            nutrient_context[normalized_food_name] = float(row[nutrient])
+        nutrient_context[normalized_food_name] = float(row[nutrient])
     return nutrient_context
 
 

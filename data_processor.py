@@ -40,7 +40,6 @@ def load_and_process_data(
     food_name_mapping = {
         row["Nom"]: normalize_food_names(row["Nom"])
         for _, row in variables_df.iterrows()
-        if pd.notna(row["Nom"])
     }
 
     # Identify all nutrients available in the variables file (excluding 'Nom')
