@@ -45,8 +45,6 @@ def get_met_value(activity: str, speed_kmh: float) -> float:
     Gets the MET value for an activity based on speed, using linear interpolation.
     If speed is outside the defined range, it clamps to the min/max value.
     """
-    if activity not in MET_VALUES or not MET_VALUES[activity]:
-        return 0.0
 
     met_table = MET_VALUES[activity]
     speeds, mets = zip(*met_table)
@@ -69,7 +67,7 @@ def WALKING_CALORIES(
     Calculates the calories burned during walking based on speed.
     """
     if duration_minutes <= 0:
-        return 0.0
+        raise ValueError("Duration must be greater than 0")
 
     speed_kmh = (distance_meters / 1000.0) / (duration_minutes / 60.0)
     met_value = get_met_value("walking", speed_kmh)
@@ -87,7 +85,7 @@ def RUNNING_CALORIES(
     Calculates the calories burned from running based on speed.
     """
     if duration_minutes <= 0:
-        return 0.0
+        raise ValueError("Duration must be greater than 0")
 
     speed_kmh = (distance_meters / 1000.0) / (duration_minutes / 60.0)
     met_value = get_met_value("running", speed_kmh)
@@ -105,7 +103,7 @@ def CYCLING_CALORIES(
     Calculates the calories burned from cycling based on speed.
     """
     if duration_minutes <= 0:
-        return 0.0
+        raise ValueError("Duration must be greater than 0")
 
     speed_kmh = (distance_meters / 1000.0) / (duration_minutes / 60.0)
     met_value = get_met_value("cycling", speed_kmh)
