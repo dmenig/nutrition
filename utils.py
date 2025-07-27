@@ -4,9 +4,6 @@ import operator as op
 import pandas as pd
 
 
-FOOD_NAME_MAPPINGS = {
-    "salade boulgour quinoa fruits secsm": "salade boulgour quinoa fruits secs",
-}
 
 
 def strip_accents(text):
@@ -65,7 +62,6 @@ class SafeFormulaEvaluator(ast.NodeVisitor):
         if node.id == "WEIGHT":
             return self.context["WEIGHT"]
         normalized_id = strip_accents(node.id.lower()).replace(" ", "_").replace("'", "_")
-        normalized_id = FOOD_NAME_MAPPINGS.get(normalized_id, normalized_id)
 
         if normalized_id in self.context:
             return self.context[normalized_id]

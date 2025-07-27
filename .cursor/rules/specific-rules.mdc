@@ -1,4 +1,0 @@
----
-alwaysApply: true
----
-- Always ask before adding a food to `FOOD_NAME_MAPPINGS`
