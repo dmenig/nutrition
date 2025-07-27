@@ -33,20 +33,12 @@ class FinalModel(nn.Module):
             nn.ReLU(),
             nn.Linear(64, 1)
         )
-        
-        # Head to predict water retention
-        self.water_retention_head = nn.Sequential(
-            nn.Linear(head_input_size, 64),
-            nn.ReLU(),
-            nn.Linear(64, 1)
-        )
 
     def forward(self, nutrition_data):
         batch_size, seq_len, _ = nutrition_data.size()
         gru_out, _ = self.gru(nutrition_data)
         
         base_metabolisms = []
-        water_retentions = []
         
         current_metabolism = self.initial_metabolism.expand(batch_size, 1)
 
@@ -60,17 +52,12 @@ class FinalModel(nn.Module):
             current_metabolism = current_metabolism + metabolism_increment
             base_metabolisms.append(current_metabolism)
             
-            # Predict water retention
-            current_wr = torch.tanh(self.water_retention_head(combined_input)) * 2.5
-            water_retentions.append(current_wr)
-            
-        return torch.stack(base_metabolisms, dim=1), torch.stack(water_retentions, dim=1)
+        return torch.stack(base_metabolisms, dim=1)
 
 
 def reconstruct_trajectory(
     observed_weights,
     base_metabolisms,
-    predicted_water_retentions,
     nutrition_data,
     sport_data,
     initial_adj_weight,
@@ -95,7 +82,7 @@ def reconstruct_trajectory(
         w_adj_pred_list.append(w_adj_t)
         
     w_adj_pred = torch.stack(w_adj_pred_list, dim=1)
-    w_pred = w_adj_pred + predicted_water_retentions.squeeze(-1)
+    w_pred = w_adj_pred
     
     return w_pred, w_adj_pred
 
@@ -103,7 +90,6 @@ def reconstruct_trajectory(
 def calculate_loss(
     observed_weights,
     predicted_observed_weight,
-    predicted_water_retentions,
 ):
     # Loss component 1: Match the observed weight, with a gentle weight on recent data
     seq_len = observed_weights.shape[1]
@@ -111,15 +97,10 @@ def calculate_loss(
     squared_errors = (predicted_observed_weight - observed_weights) ** 2
     loss_fit = torch.mean(squared_errors * time_weights)
     
-    # Loss component 2: Penalize non-zero mean water retention
-    loss_wr_mean = torch.mean(predicted_water_retentions) ** 2
-    
-    # Combine losses with a weight for the mean penalty
-    total_loss = loss_fit + 5.0 * loss_wr_mean
+    total_loss = loss_fit
     
     return total_loss, {
-        "loss_fit": loss_fit.item(),
-        "loss_wr_mean": loss_wr_mean.item()
+        "loss_fit": loss_fit.item()
     }
 
 
@@ -151,20 +132,21 @@ def main():
     # Model, Optimizer
     initial_weight_guess = observed_weights[:, :5].mean().item()
     model = FinalModel(nutrition_data.shape[2], initial_weight_guess)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001) # Increased LR, added weight decay
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0.001, weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', factor=0.5, patience=50, verbose=True)
 
     print("Starting training with Final, Stable Model...")
     for epoch in range(600):
         optimizer.zero_grad()
 
-        base_metabolisms, water_retentions = model(nutrition_data)
+        base_metabolisms = model(nutrition_data)
 
         predicted_observed_weight, _ = reconstruct_trajectory(
-            observed_weights, base_metabolisms, water_retentions, 
+            observed_weights, base_metabolisms, 
             nutrition_data, sport_data, model.initial_adj_weight, normalization_stats
         )
         
-        loss, loss_components = calculate_loss(observed_weights, predicted_observed_weight, water_retentions)
+        loss, loss_components = calculate_loss(observed_weights, predicted_observed_weight)
 
         if torch.isnan(loss):
             print(f"NaN detected at epoch {epoch}, stopping training.")
@@ -173,6 +155,7 @@ def main():
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
+        scheduler.step(loss)
 
         if epoch % 50 == 0:
             print(f"Epoch {epoch}, Loss: {loss.item():.4f}")
@@ -184,15 +167,14 @@ def main():
     if not os.path.exists("data"): os.makedirs("data")
 
     with torch.no_grad():
-        final_metabolisms, final_wr = model(nutrition_data)
+        final_metabolisms = model(nutrition_data)
         _, final_w_adj = reconstruct_trajectory(
-            observed_weights, final_metabolisms, final_wr, 
+            observed_weights, final_metabolisms, 
             nutrition_data, sport_data, model.initial_adj_weight, normalization_stats
         )
 
     results_df = features_df.copy()
     results_df["M_base"] = final_metabolisms.squeeze().numpy() * 1000
-    results_df["WR"] = final_wr.squeeze().numpy()
     results_df["W_obs"] = features_df["pds"]
     results_df["W_adj_pred"] = final_w_adj.squeeze().numpy() + weight_mean
     

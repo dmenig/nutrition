@@ -8,11 +8,11 @@ import matplotlib.pyplot as plt
 from train_model import FinalModel
 
 def run_simulation(model, nutrition_data_tensor, device):
-    """Runs the model on the given data and returns the WR prediction."""
+    """Runs the model on the given data and returns the metabolism prediction."""
     model.eval()
     with torch.no_grad():
-        _, water_retentions = model(nutrition_data_tensor.to(device))
-    return water_retentions.squeeze().cpu().numpy()
+        base_metabolisms = model(nutrition_data_tensor.to(device))
+    return base_metabolisms.squeeze().cpu().numpy()
 
 def main():
     # --- Load Data and Model ---
@@ -77,10 +77,15 @@ def main():
     for name, data in results.items():
         print(f"Scenario: {name}")
         print(f"  Shape: {data.shape}")
-        print(f"  Mean: {np.mean(data):.4f}")
-        print(f"  Std Dev: {np.std(data):.4f}")
-        print(f"  Min: {np.min(data):.4f}")
-        print(f"  Max: {np.max(data):.4f}")
+        # Un-normalize metabolism for interpretation by multiplying by 1000
+        mean_metabolism = np.mean(data) * 1000
+        std_metabolism = np.std(data) * 1000
+        min_metabolism = np.min(data) * 1000
+        max_metabolism = np.max(data) * 1000
+        print(f"  Mean Metabolism: {mean_metabolism:.2f} kcal")
+        print(f"  Std Dev: {std_metabolism:.2f} kcal")
+        print(f"  Min Metabolism: {min_metabolism:.2f} kcal")
+        print(f"  Max Metabolism: {max_metabolism:.2f} kcal")
         if np.isnan(data).any():
             print(f"  WARNING: Contains NaN values!")
     print("------------------------------------------\n")
@@ -93,15 +98,15 @@ def main():
     time_index = np.arange(len(features_df))
     plot_range = slice(-simulation_days, None)
 
-    ax.plot(time_index[plot_range], results["control"][plot_range], label="Control (Original Data)", color='k', linestyle='--', linewidth=2)
-    ax.plot(time_index[plot_range], results["high_salt"][plot_range], label="High Salt Scenario", color='r', linewidth=2.5, alpha=0.8)
-    ax.plot(time_index[plot_range], results["high_carbs"][plot_range], label="High Carbs Scenario", color='b', linewidth=2.5, alpha=0.8)
-    ax.plot(time_index[plot_range], results["high_water"][plot_range], label="High Water Intake Scenario", color='g', linewidth=2.5, alpha=0.8)
+    ax.plot(time_index[plot_range], results["control"][plot_range] * 1000, label="Control (Original Data)", color='k', linestyle='--', linewidth=2)
+    ax.plot(time_index[plot_range], results["high_salt"][plot_range] * 1000, label="High Salt Scenario", color='r', linewidth=2.5, alpha=0.8)
+    ax.plot(time_index[plot_range], results["high_carbs"][plot_range] * 1000, label="High Carbs Scenario", color='b', linewidth=2.5, alpha=0.8)
+    ax.plot(time_index[plot_range], results["high_water"][plot_range] * 1000, label="High Water Intake Scenario", color='g', linewidth=2.5, alpha=0.8)
 
     ax.axhline(0, color='gray', linestyle='-', alpha=0.7)
-    ax.set_title("Sensitivity Analysis: How Nutrition Affects Predicted Water Retention", fontsize=16, pad=20)
+    ax.set_title("Sensitivity Analysis: How Nutrition Affects Predicted Base Metabolism", fontsize=16, pad=20)
     ax.set_xlabel("Days", fontsize=12)
-    ax.set_ylabel("Predicted Water Retention (kg)", fontsize=12)
+    ax.set_ylabel("Predicted Base Metabolism (kcal/day)", fontsize=12)
     ax.legend(fontsize=11)
     ax.tick_params(axis='x', labelsize=10)
     ax.tick_params(axis='y', labelsize=10)
