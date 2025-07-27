@@ -78,7 +78,7 @@ def load_and_process_data(
             # Use the pre-loaded context for calculation
             if food_formula:
                 calculated_value = calculate_nutrient_from_formula_with_context(
-                    food_formula, nutrient_contexts[nutrient], nutrient
+                    food_formula, nutrient_contexts[nutrient]
                 )
             else:
                 calculated_value = 0

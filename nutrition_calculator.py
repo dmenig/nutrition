@@ -25,7 +25,7 @@ def get_nutrient_context(nutrient: str, variables_df: pd.DataFrame) -> dict:
 
 
 def calculate_nutrient_from_formula_with_context(
-    formula: str, nutrient_context: dict, nutrient: str
+    formula: str, nutrient_context: dict
 ) -> float:
     """
     Calculates the total nutrient value from a food formula string using a pre-built nutrient context.
@@ -33,7 +33,6 @@ def calculate_nutrient_from_formula_with_context(
     Args:
         formula: A string representing the food formula (e.g., "100 * pain + 50 * fromage").
         nutrient_context: A dictionary mapping food names to their corresponding nutrient values.
-        nutrient: The specific nutrient to calculate (e.g., 'Kcal').
 
     Returns:
         The calculated total nutrient value.
@@ -49,24 +48,3 @@ def calculate_nutrient_from_formula_with_context(
     return result
 
 
-def calculate_nutrient_from_formula(
-    food_formula: str,
-    nutrient: str,
-    variables_file_path: str = "data/variables.csv",
-) -> float:
-    """
-    Calculates the total nutrient value from a food formula string.
-
-    Args:
-        food_formula: A string representing the food formula (e.g., "100 * pain + 50 * fromage").
-        nutrient: The specific nutrient to calculate (e.g., 'Kcal').
-        variables_file_path: Path to the CSV file containing nutrient variables.
-
-    Returns:
-        The calculated total nutrient value.
-    """
-    variables_df = pd.read_csv(variables_file_path)
-    nutrient_context = get_nutrient_context(nutrient, variables_df)
-    return calculate_nutrient_from_formula_with_context(
-        food_formula, nutrient_context, nutrient
-    )
