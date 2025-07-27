@@ -3,7 +3,7 @@ import sport_formulas
 import nutrition_calculator
 import pandas as pd
 import ast
-from utils import SafeSportFormulaEvaluator, strip_accents, normalize_food_names
+from utils import SafeSportFormulaEvaluator, normalize_food_names
 
 
 def calculate_sport_calories(row: pd.Series) -> float:
