@@ -7,15 +7,7 @@ from nutrition_calculator import (
     get_nutrient_context,
     calculate_nutrient_from_formula_with_context,
 )
-from utils import strip_accents
-
-
-def normalize_food_names(name):
-    """
-    Normalizes a food name to be a valid Python identifier.
-    """
-    name = strip_accents(str(name)).lower()
-    return re.sub(r"[^a-zA-Z0-9_]+", "_", name)
+from utils import normalize_food_names
 
 
 def load_and_process_data(
@@ -44,8 +36,19 @@ def load_and_process_data(
     journal_df.set_index("Date", inplace=True)
     journal_df.sort_index(inplace=True)
 
+    # Create a mapping from original to normalized food names
+    food_name_mapping = {
+        row["Nom"]: normalize_food_names(row["Nom"])
+        for _, row in variables_df.iterrows()
+        if pd.notna(row["Nom"])
+    }
+
     # Identify all nutrients available in the variables file (excluding 'Nom')
-    all_nutrients = [col for col in variables_df.columns if col != "Nom"]
+    all_nutrients = [
+        col
+        for col in variables_df.columns
+        if col != "Nom" and not str(col).startswith("Unnamed")
+    ]
 
     print(f"Identified nutrients: {all_nutrients}")
 
@@ -61,6 +64,16 @@ def load_and_process_data(
     for date, row in journal_df.iterrows():
         daily_data = {"Date": date, "Pds": row["Pds"], "Sport": row["Sport"]}
         food_formula = str(row["Nourriture"]) if pd.notna(row["Nourriture"]) else ""
+
+        # Normalize food names within the formula
+        for original_name, normalized_name in food_name_mapping.items():
+            # Use regex to replace whole words only, ignoring case
+            food_formula = re.sub(
+                r"\b" + re.escape(original_name) + r"\b",
+                normalized_name,
+                food_formula,
+                flags=re.IGNORECASE,
+            )
 
         for nutrient in all_nutrients:
             # Use the pre-loaded context for calculation
@@ -78,84 +91,3 @@ def load_and_process_data(
     features_df.sort_index(inplace=True)
 
     return features_df
-
-
-if __name__ == "__main__":
-    # Example usage:
-    # Ensure process_nutrition_journal.py has been run to create processed_journal.csv
-    # and variables.csv in the data/ directory.
-    print("Running data processing...")
-    # This part is for demonstration. In a real scenario, ensure these files exist.
-    # You might need to run process_nutrition_journal.py first.
-    # subprocess.run(["python3", "process_nutrition_journal.py"], check=True)
-
-    # For testing, let's assume the files are already there or create dummy ones
-    # if they don't exist for a quick run.
-    # In a full run, the user would ensure these are generated.
-
-    # Dummy data creation for testing if files don't exist
-    if not os.path.exists("data/processed_journal.csv"):
-        print("Creating dummy processed_journal.csv for demonstration.")
-        dummy_journal = pd.DataFrame(
-            {
-                "Date": pd.to_datetime(["2024-07-01", "2024-07-02", "2024-07-03"]),
-                "Pds": [70.0, 70.5, 70.2],
-                "Nourriture": [
-                    "100 * pain + 50 * fromage",
-                    "200 * poulet",
-                    "150 * riz",
-                ],
-                "Sport": ["", "", ""],
-            }
-        )
-        os.makedirs("data", exist_ok=True)
-        dummy_journal.to_csv("data/processed_journal.csv", index=False)
-
-    if not os.path.exists("data/variables.csv"):
-        print("Creating dummy variables.csv for demonstration.")
-        dummy_variables = pd.DataFrame(
-            {
-                "Nom": ["pain", "fromage", "poulet", "riz"],
-                "Calories / 100g": [250, 400, 165, 130],
-                "Proteines / 100g": [10, 25, 30, 3],
-                "Glucides / 100g": [50, 2, 0, 28],
-                "Lipides / 100g": [2, 30, 5, 0],
-                "Alcool / 100g": [0, 0, 0, 0],
-            }
-        )
-        dummy_variables.to_csv("data/variables.csv", index=False)
-
-    features_df = load_and_process_data()
-    print("\nProcessed Features DataFrame (first 3 rows):")
-    print(features_df.head(3))
-    print(f"\nDataFrame shape: {features_df.shape}")
-    print(f"DataFrame columns: {features_df.columns.tolist()}")
-
-
-def normalize_food_names(name):
-    """
-    Normalizes a food name to be a valid Python identifier.
-    """
-    name = strip_accents(str(name)).lower()
-    return re.sub(r"[^a-zA-Z0-9_]+", "_", name)
-
-
-def save_normalized_variables(
-    variables_path="data/variables.csv",
-    normalized_path="data/normalized_variables.csv",
-):
-    """
-    Reads the variables CSV, normalizes the 'Nom' column to be valid Python
-    identifiers, and saves the result to a new CSV file.
-    """
-    if not os.path.exists(variables_path):
-        raise FileNotFoundError(f"Variables file not found: {variables_path}")
-
-    variables_df = pd.read_csv(variables_path)
-
-    # Normalize the 'Nom' column
-    variables_df["Nom"] = variables_df["Nom"].apply(normalize_food_names)
-
-    # Save the normalized DataFrame
-    variables_df.to_csv(normalized_path, index=False)
-    print(f"Normalized variables saved to {normalized_path}")

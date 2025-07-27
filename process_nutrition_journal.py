@@ -6,7 +6,7 @@ from openpyxl.utils import get_column_letter
 from datetime import datetime, timedelta
 import glob
 import ast
-from utils import SafeFormulaEvaluator
+from utils import SafeFormulaEvaluator, normalize_food_names
 
 
 def evaluate_weight_cell(pds_cell, sheet_values):
@@ -17,7 +17,6 @@ def evaluate_weight_cell(pds_cell, sheet_values):
     """
     if pds_cell.data_type == "f":  # It's a formula
         formula = pds_cell.value
-        print(f"Evaluating formula: {formula}")
         expression = formula.lstrip("=")
 
         # Find all cell references (e.g., A1, $B$2)
@@ -34,7 +33,6 @@ def evaluate_weight_cell(pds_cell, sheet_values):
         evaluator = SafeFormulaEvaluator()
         node = ast.parse(expression, mode="eval").body
         result = evaluator.visit(node)
-        print(f"Formula evaluated to: {result}")
         return result
     else:  # It's a direct value
         return float(pds_cell.value)
@@ -141,6 +139,7 @@ def main():
     journal_df.dropna(subset=["Date"], inplace=True)
     journal_df["Date"] = pd.to_datetime(journal_df["Date"])
 
+
     # --- 4. Filter "Journal" data ---
     filtered_journal_df = journal_df[journal_df["Date"] >= "2024-06-30"].copy()
 
@@ -151,10 +150,18 @@ def main():
 
     # --- 6. Process and save "Variables" sheet ---
     variables_df = pd.read_excel(source_file, sheet_name="Variables")
+
+    # Drop rows where 'Nom' is NaN and reset index
+    variables_df.dropna(subset=["Nom"], inplace=True)
+    variables_df.reset_index(drop=True, inplace=True)
+
+    # Normalize the 'Nom' column before saving
+    variables_df["Nom"] = variables_df["Nom"].apply(normalize_food_names)
+
     output_variables_path = os.path.join(data_dir, "variables.csv")
     variables_df.to_csv(output_variables_path, index=False)
     print(
-        f"Successfully processed 'Variables' sheet and saved to {output_variables_path}"
+        f"Successfully processed and normalized 'Variables' sheet, saved to {output_variables_path}"
     )
 
 

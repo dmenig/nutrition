@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from build_features import main as build_features_main
 from sport_formulas import WALKING_CALORIES, RUNNING_CALORIES
-from data_processor import normalize_food_names, save_normalized_variables
+from data_processor import normalize_food_names
 
 
 def test_build_features_end_to_end():
@@ -77,22 +77,13 @@ def test_build_features_end_to_end():
     with (
         patch("pandas.read_csv") as mock_read_csv,
         patch("pandas.DataFrame.to_csv") as mock_to_csv,
-        patch("os.path.exists") as mock_exists,
     ):
-        # Mock os.path.exists to return True, so the script thinks
-        # normalized_variables.csv already exists.
-        mock_exists.return_value = True
-
         # Configure the mock to return different dataframes based on the file path
         def read_csv_side_effect(filepath):
             if "journal" in filepath:
                 return journal_df.copy()
-            elif "normalized_variables" in filepath:
-                # The script should now be reading the normalized file
-                return normalized_variables_df.copy()
             elif "variables.csv" in filepath:
-                # This case is for completeness, though it won't be hit in this setup
-                return variables_df.copy()
+                return normalized_variables_df.copy()
             return pd.DataFrame()
 
         mock_read_csv.side_effect = read_csv_side_effect
@@ -339,8 +330,4 @@ def test_build_features_end_to_end():
                 )
 
     # Verify that the to_csv mock was called correctly
-    expected_calls = [
-        call("data/normalized_variables.csv", index=False),
-        call("data/features.csv"),
-    ]
-    mock_to_csv.assert_has_calls(expected_calls, any_order=False)
+    mock_to_csv.assert_called_once_with("data/features.csv")

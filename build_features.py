@@ -3,7 +3,7 @@ import sport_formulas
 import nutrition_calculator
 import pandas as pd
 import ast
-from utils import SafeSportFormulaEvaluator, strip_accents
+from utils import SafeSportFormulaEvaluator, strip_accents, normalize_food_names
 
 
 def calculate_sport_calories(row: pd.Series) -> float:
@@ -47,6 +47,10 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     print("--- Starting Feature Building ---")
 
+    # Specifically rename 'calories_/_100g' to 'calories'
+    if "calories_/_100g" in df.columns:
+        df.rename(columns={"calories_/_100g": "calories"}, inplace=True)
+
     # Calculate sport calories and handle original 'Sport' column
     if "Sport" in df.columns and "Pds" in df.columns:
         df["sport"] = df.apply(calculate_sport_calories, axis=1)
@@ -57,13 +61,9 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # Clean and format all column names
     new_columns = {}
     for col in df.columns:
-        new_col = strip_accents(str(col)).replace(" ", "_").lower()
+        new_col = normalize_food_names(col)
         new_columns[col] = new_col
     df.rename(columns=new_columns, inplace=True)
-
-    # Specifically rename 'calories_/_100g' to 'calories'
-    if "calories_/_100g" in df.columns:
-        df.rename(columns={"calories_/_100g": "calories"}, inplace=True)
 
     # Ensure 'calories' column exists, if not, create it with 0s
     if "calories" not in df.columns:
@@ -84,16 +84,10 @@ def main():
     """
     print("--- Starting Data Processing ---")
 
-    # Normalize variables before processing
-    data_processor.save_normalized_variables(
-        variables_path="data/variables.csv",
-        normalized_path="data/normalized_variables.csv",
-    )
-
-    # Load data and calculate nutritional features using the normalized variables
+    # Load data and calculate nutritional features
     features_df = data_processor.load_and_process_data(
         journal_path="data/processed_journal.csv",
-        variables_path="data/normalized_variables.csv",
+        variables_path="data/variables.csv",
     )
 
     # Build features

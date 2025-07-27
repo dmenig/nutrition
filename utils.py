@@ -2,8 +2,17 @@ import unicodedata
 import ast
 import operator as op
 import pandas as pd
+import re
 
 
+def normalize_food_names(name):
+    """
+    Normalizes a food name to be a valid Python identifier.
+    """
+    if not isinstance(name, str):
+        return name
+    name = strip_accents(str(name)).lower()
+    return re.sub(r"[^a-zA-Z0-9_]+", "_", name)
 
 
 def strip_accents(text):
@@ -58,11 +67,10 @@ class SafeFormulaEvaluator(ast.NodeVisitor):
 
     def visit_Name(self, node):
         """Handles variable names."""
-        # Normalize the variable name by replacing underscores with spaces
+        # Normalize the variable name to match context keys
         if node.id == "WEIGHT":
             return self.context["WEIGHT"]
-        normalized_id = strip_accents(node.id.lower()).replace(" ", "_").replace("'", "_")
-
+        normalized_id = normalize_food_names(node.id)
         if normalized_id in self.context:
             return self.context[normalized_id]
         raise ValueError(f"Name '{node.id}' is not defined in the given context.")

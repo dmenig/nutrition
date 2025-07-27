@@ -1,7 +1,7 @@
 import csv
 import ast
 import pandas as pd
-from utils import SafeFormulaEvaluator, strip_accents
+from utils import SafeFormulaEvaluator, normalize_food_names
 
 
 def get_nutrient_context(nutrient: str, variables_df: pd.DataFrame) -> dict:
@@ -19,9 +19,7 @@ def get_nutrient_context(nutrient: str, variables_df: pd.DataFrame) -> dict:
     for _, row in variables_df.iterrows():
         food_name = str(row["Nom"])
         # Normalize the food name before adding it to the context
-        normalized_food_name = (
-            strip_accents(food_name.lower()).replace(" ", "_").replace("'", "_")
-        )
+        normalized_food_name = normalize_food_names(food_name)
         if nutrient in row and pd.notna(row[nutrient]):
             nutrient_context[normalized_food_name] = float(row[nutrient])
     return nutrient_context
@@ -55,7 +53,7 @@ def calculate_nutrient_from_formula_with_context(
 def calculate_nutrient_from_formula(
     food_formula: str,
     nutrient: str,
-    variables_file_path: str = "data/normalized_variables.csv",
+    variables_file_path: str = "data/variables.csv",
 ) -> float:
     """
     Calculates the total nutrient value from a food formula string.
