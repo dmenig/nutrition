@@ -147,6 +147,11 @@ class PredictionService:
             return base_metabolisms.squeeze().tolist()
 
 
+@app.get("/api/v1/health")
+def health_check():
+    return {"status": "ok"}
+
+
 prediction_service = PredictionService()
 
 

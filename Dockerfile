@@ -26,11 +26,6 @@ COPY train_model.py ./
 COPY data/ ./data/
 COPY models/ ./models/
 
-# Add these lines for debugging
-RUN echo "Listing contents of /app:"
-RUN ls -la /app
-RUN echo "Listing contents of /app/models:"
-RUN ls -la /app/models
 
 # Make port 8000 available to the world outside this container
 EXPOSE 8000

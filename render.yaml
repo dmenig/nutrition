@@ -1,0 +1,8 @@
+services:
+  - type: web
+    name: nutrition-app
+    env: docker
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: PORT
+        value: 8000
