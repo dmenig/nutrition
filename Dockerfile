@@ -24,7 +24,7 @@ COPY utils.py ./
 COPY nutrition_calculator.py ./
 COPY train_model.py ./
 COPY data/ ./data/
-
+COPY models/ ./models/
 
 # Make port 8000 available to the world outside this container
 EXPOSE 8000
