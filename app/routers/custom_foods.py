@@ -24,12 +24,12 @@ def create_custom_food(
 ):
     db_food = CustomFood(
         id=uuid4(),
-        name=food.name,
-        calories=food.calories,
-        protein=food.protein,
-        carbohydrates=food.carbohydrates,
-        fat=food.fat,
-        owner_id=current_user.id,
+        food_name=food.food_name,
+        calories_per_100g=food.calories_per_100g,
+        protein_per_100g=food.protein_per_100g,
+        carbs_per_100g=food.carbs_per_100g,
+        fat_per_100g=food.fat_per_100g,
+        user_id=current_user.id,
     )
     db.add(db_food)
     db.commit()
@@ -42,7 +42,7 @@ def read_custom_foods(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return db.query(CustomFood).filter(CustomFood.owner_id == current_user.id).all()
+    return db.query(CustomFood).filter(CustomFood.user_id == current_user.id).all()
 
 
 @router.delete("/api/v1/custom-foods/{food_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -53,7 +53,7 @@ def delete_custom_food(
 ):
     db_food = (
         db.query(CustomFood)
-        .filter(CustomFood.id == food_id, CustomFood.owner_id == current_user.id)
+        .filter(CustomFood.id == food_id, CustomFood.user_id == current_user.id)
         .first()
     )
     if not db_food:

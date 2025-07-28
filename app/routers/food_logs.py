@@ -31,7 +31,7 @@ def get_daily_food_log_summary(
             func.sum(FoodLog.fat).label("fat_g"),
         )
         .filter(
-            FoodLog.owner_id == current_user["id"], func.date(FoodLog.logged_at) == date
+            FoodLog.user_id == current_user["id"], func.date(FoodLog.logged_at) == date
         )
         .group_by(func.date(FoodLog.logged_at))
         .first()
@@ -50,7 +50,7 @@ def create_food_log(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    db_food_log = FoodLog(**food_log.dict(), owner_id=current_user["id"])
+    db_food_log = FoodLog(**food_log.dict(), user_id=current_user["id"])
     db.add(db_food_log)
     db.commit()
     db.refresh(db_food_log)
@@ -65,7 +65,7 @@ def get_food_logs_for_date(
 ):
     food_logs = (
         db.query(FoodLog)
-        .filter(FoodLog.owner_id == current_user["id"], FoodLog.log_date == date)
+        .filter(FoodLog.user_id == current_user["id"], FoodLog.logged_at == date)
         .all()
     )
     return food_logs
@@ -80,7 +80,7 @@ def update_food_log(
 ):
     db_food_log = (
         db.query(FoodLog)
-        .filter(FoodLog.id == log_id, FoodLog.owner_id == current_user["id"])
+        .filter(FoodLog.id == log_id, FoodLog.user_id == current_user["id"])
         .first()
     )
     if not db_food_log:
@@ -102,7 +102,7 @@ def delete_food_log(
 ):
     db_food_log = (
         db.query(FoodLog)
-        .filter(FoodLog.id == log_id, FoodLog.owner_id == current_user["id"])
+        .filter(FoodLog.id == log_id, FoodLog.user_id == current_user["id"])
         .first()
     )
     if not db_food_log:

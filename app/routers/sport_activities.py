@@ -23,7 +23,7 @@ def create_sport_activity(
     current_user: schemas.UserOut = Depends(get_current_user),
 ):
     db_sport_activity = SportActivity(
-        **sport_activity.model_dump(), owner_id=current_user.id
+        **sport_activity.model_dump(), user_id=current_user.id
     )
     db.add(db_sport_activity)
     db.commit()
@@ -48,7 +48,8 @@ def get_sport_activities_by_date(
     sport_activities = (
         db.query(SportActivity)
         .filter(
-            SportActivity.owner_id == current_user.id, SportActivity.date == parsed_date
+            SportActivity.user_id == current_user.id,
+            SportActivity.logged_at == parsed_date,
         )
         .all()
     )
@@ -64,7 +65,7 @@ def delete_sport_activity(
     db_sport_activity = (
         db.query(SportActivity)
         .filter(
-            SportActivity.id == activity_id, SportActivity.owner_id == current_user.id
+            SportActivity.id == activity_id, SportActivity.user_id == current_user.id
         )
         .first()
     )

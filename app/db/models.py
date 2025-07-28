@@ -1,10 +1,10 @@
 import uuid
 from sqlalchemy import Column, String, Float, Integer, ForeignKey, TIMESTAMP
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy.orm import relationship
 from datetime import datetime
 
-Base = declarative_base()
+from .database import Base
 
 
 class User(Base):
@@ -29,7 +29,7 @@ class FoodLog(Base):
         TIMESTAMP(timezone=True), default=datetime.utcnow, nullable=False
     )
 
-    user = relationship("User", back_populates="food_logs")
+    user = relationship("User")
 
 
 class SportActivity(Base):
@@ -43,7 +43,7 @@ class SportActivity(Base):
         TIMESTAMP(timezone=True), default=datetime.utcnow, nullable=False
     )
 
-    user = relationship("User", back_populates="sport_activities")
+    user = relationship("User")
 
 
 class CustomFood(Base):
@@ -56,4 +56,4 @@ class CustomFood(Base):
     carbs_per_100g = Column(Float)
     fat_per_100g = Column(Float)
 
-    user = relationship("User", back_populates="custom_foods")
+    user = relationship("User")

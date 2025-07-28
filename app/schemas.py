@@ -36,11 +36,11 @@ from uuid import UUID
 
 
 class CustomFoodBase(BaseModel):
-    name: str
-    calories: float
-    protein: float
-    carbohydrates: float
-    fat: float
+    food_name: str
+    calories_per_100g: float
+    protein_per_100g: float
+    carbs_per_100g: float
+    fat_per_100g: float
 
 
 class CustomFoodCreate(CustomFoodBase):
@@ -53,7 +53,7 @@ class CustomFoodUpdate(CustomFoodBase):
 
 class CustomFoodOut(CustomFoodBase):
     id: UUID
-    owner_id: int
+    user_id: UUID
 
     class Config:
         from_attributes = True
@@ -63,10 +63,10 @@ from datetime import datetime
 
 
 class SportActivityBase(BaseModel):
-    name: str
-    date: datetime
+    activity_name: str
+    logged_at: datetime
     duration_minutes: int
-    calories_burned: float
+    calories_expended: float
 
 
 class SportActivityCreate(SportActivityBase):
@@ -79,17 +79,21 @@ class SportActivityUpdate(SportActivityBase):
 
 class SportActivityOut(SportActivityBase):
     id: UUID
-    owner_id: int
+    user_id: UUID
 
     class Config:
         from_attributes = True
 
 
 class FoodLogBase(BaseModel):
-    food_item: str
+    food_name: str
     quantity: float
     unit: str
-    log_date: datetime
+    logged_at: datetime
+    calories: float
+    protein: float
+    carbs: float
+    fat: float
 
 
 class FoodLogCreate(FoodLogBase):
@@ -102,7 +106,7 @@ class FoodLogUpdate(FoodLogBase):
 
 class FoodLogOut(FoodLogBase):
     id: UUID
-    owner_id: int
+    user_id: UUID
 
     class Config:
         from_attributes = True

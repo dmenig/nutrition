@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.security import get_password_hash, verify_password
 from app.db.models import User
-from app.db.database import SessionLocal
+from app.db.database import get_db
 from app.core.config import settings
 from app.core.auth import (
     create_access_token,
@@ -17,14 +17,6 @@ from app.core.auth import (
 from app.schemas import UserCreate, Token, UserOut
 
 router = APIRouter()
-
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 @router.post("/register", response_model=UserOut)

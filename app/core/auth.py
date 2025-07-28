@@ -8,19 +8,11 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.security import verify_password
-from app.db.database import SessionLocal
+from app.db.database import get_db
 from app.db.models import User
 from app.schemas import TokenData, UserOut
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/v1/auth/token")
-
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None):
