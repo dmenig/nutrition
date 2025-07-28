@@ -16,11 +16,6 @@ def get_api_key(api_key: str = Depends(api_key_header)):
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid API Key",
     )
-        return api_key
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Invalid API Key",
-    )
 
 
 @router.post("/retrain", status_code=status.HTTP_200_OK)
