@@ -10,7 +10,7 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = ".env"
-        env_prefix = "NEON_"  # This will make it look for NEON_DATABASE_URL
+        env_prefix = ""
 
 
 settings = Settings()
