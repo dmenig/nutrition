@@ -23,3 +23,8 @@ models/
 android_app/java_pid1361541.hprof
 android_app/app/build/
 android_app/.gradle/
+
+# Test database configuration
+.env.test
+.env
+.env.local
