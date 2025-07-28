@@ -191,7 +191,7 @@ def get_plot_data():
 
     # De-normalize calories and sport for plotting
     try:
-        with open("best_params.json", "r") as f:
+        with open("models/best_params.json", "r") as f:
             params = json.load(f)
             normalization_stats = params["normalization"]
     except FileNotFoundError:
