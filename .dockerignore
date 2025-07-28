@@ -1,3 +1,25 @@
+# Git
+.git
+.gitignore
+
+# Python
+*.pyc
+__pycache__/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Env files
+.env
+.env.local
+.env.*
+
+# Other
+*.log
+*.DS_Store
+
 # Exclude Android app
 android_app/
 
@@ -6,29 +28,3 @@ plan/
 
 # Exclude tests directory
 tests/
-
-# Exclude Git-related files
-.git
-.gitignore
-
-# Exclude Python cache files
-*.pyc
-__pycache__/
-
-# Exclude environment files
-.env
-.env.local
-
-# Exclude documentation
-README.md
-
-# Exclude other unnecessary files/scripts
-*.md
-*.sh
-*.yml
-*.env*
-.vscode/
-.idea/
-venv/
-*.log
-*.DS_Store
