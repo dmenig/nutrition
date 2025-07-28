@@ -11,7 +11,7 @@ from app.schemas import (
     FoodLogOut,
     DailyFoodLogSummary,
 )  # Import DailyFoodLogSummary
-from app.core.security import get_current_user
+from app.core.auth import get_current_user
 from app.db.database import get_db
 
 router = APIRouter()
