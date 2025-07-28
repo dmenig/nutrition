@@ -117,8 +117,8 @@ def calculate_loss(
 def train_and_save_model(
     food_data_df,
     sport_data_df,
-    model_save_path="recurrent_model.pth",
-    params_save_path="best_params.json",
+    model_save_path="models/recurrent_model.pth",
+    params_save_path="models/best_params.json",
 ):
     # Combine food and sport data into a single DataFrame for feature building
     # Assuming food_data_df and sport_data_df have a common 'date' or 'timestamp' column
@@ -149,16 +149,21 @@ def train_and_save_model(
 
     # For now, let's call build_features.main() and assume it can handle the data.
     # This is a temporary placeholder and will need refinement.
+    print("Calling build_features.main() to get features_df...")
     from build_features import main as build_features_main
 
     features_df = build_features_main(
-        food_data_df, sport_data_df
-    )  # This line will need adjustment based on build_features.py
+        journal_path="data/processed_journal.csv",
+        variables_path="data/variables.csv",
+    )
+    print(f"Features DataFrame loaded. Shape: {features_df.shape}")
 
+    print("Starting data cleaning and normalization...")
     # Data cleaning and normalization
     nutrition_cols = ["calories", "carbs", "sugar", "sel", "alcool", "water"]
     for col in nutrition_cols + ["pds", "sport"]:
         features_df[col] = pd.to_numeric(features_df[col], errors="coerce").fillna(0)
+    print("Data cleaning and normalization complete.")
 
     normalization_stats = {}
     for col in nutrition_cols + ["sport"]:
@@ -188,11 +193,11 @@ def train_and_save_model(
     model = FinalModel(nutrition_data.shape[2], initial_weight_guess)
     optimizer = torch.optim.AdamW(model.parameters(), lr=0.001, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, "min", factor=0.5, patience=50, verbose=True
+        optimizer, "min", factor=0.5, patience=50
     )
 
     print("Starting training with Final, Stable Model...")
-    for epoch in range(600):
+    for epoch in range(10):
         optimizer.zero_grad()
 
         base_metabolisms = model(nutrition_data)
@@ -226,10 +231,19 @@ def train_and_save_model(
     print("Training complete.")
 
     # --- Save Results ---
+    print(f"Checking if model directory exists: {os.path.dirname(model_save_path)}")
     if not os.path.exists(os.path.dirname(model_save_path)):
         os.makedirs(os.path.dirname(model_save_path))
+        print(f"Created model directory: {os.path.dirname(model_save_path)}")
+    else:
+        print(f"Model directory already exists: {os.path.dirname(model_save_path)}")
+
+    print(f"Checking if params directory exists: {os.path.dirname(params_save_path)}")
     if not os.path.exists(os.path.dirname(params_save_path)):
         os.makedirs(os.path.dirname(params_save_path))
+        print(f"Created params directory: {os.path.dirname(params_save_path)}")
+    else:
+        print(f"Params directory already exists: {os.path.dirname(params_save_path)}")
 
     with torch.no_grad():
         final_metabolisms = model(nutrition_data)
@@ -250,13 +264,18 @@ def train_and_save_model(
     results_df.to_csv(
         "data/final_results.csv", index=False
     )  # This can remain as is, or be made configurable
+    print(f"Attempting to save model to {model_save_path}...")
     torch.save(model.state_dict(), model_save_path)
+    print(f"Model state dictionary saved to {model_save_path}.")
+
+    print(f"Attempting to save parameters to {params_save_path}...")
     with open(params_save_path, "w") as f:
         json.dump(
             {"architecture": "final_model", "normalization": normalization_stats},
             f,
             indent=4,
         )
+    print(f"Parameters saved to {params_save_path}.")
 
     print(f"Model saved to {model_save_path} and parameters to {params_save_path}.")
 
@@ -269,9 +288,10 @@ if __name__ == "__main__":
     # This ensures backward compatibility for direct execution of train_model.py
     from build_features import main as build_features_main
 
-    features_df = (
-        build_features_main()
-    )  # Call without arguments for standalone execution
+    features_df = build_features_main(
+        journal_path="data/processed_journal.csv",
+        variables_path="data/variables.csv",
+    )
 
     # Data cleaning and normalization (repeated from train_and_save_model for standalone execution)
     nutrition_cols = ["calories", "carbs", "sugar", "sel", "alcool", "water"]
@@ -306,11 +326,11 @@ if __name__ == "__main__":
     model = FinalModel(nutrition_data.shape[2], initial_weight_guess)
     optimizer = torch.optim.AdamW(model.parameters(), lr=0.001, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, "min", factor=0.5, patience=50, verbose=True
+        optimizer, "min", factor=0.5, patience=50
     )
 
     print("Starting training with Final, Stable Model (standalone execution)...")
-    for epoch in range(600):
+    for epoch in range(10):
         optimizer.zero_grad()
 
         base_metabolisms = model(nutrition_data)
@@ -344,8 +364,11 @@ if __name__ == "__main__":
     print("Training complete (standalone execution).")
 
     # --- Save Results (standalone execution) ---
-    if not os.path.exists("data"):
-        os.makedirs("data")
+    # Ensure the 'models' directory exists
+    models_dir = "models"
+    if not os.path.exists(models_dir):
+        os.makedirs(models_dir)
+        print(f"Created directory: {models_dir}")
 
     with torch.no_grad():
         final_metabolisms = model(nutrition_data)
@@ -364,8 +387,8 @@ if __name__ == "__main__":
     results_df["W_adj_pred"] = final_w_adj.squeeze().numpy() + weight_mean
 
     results_df.to_csv("data/final_results.csv", index=False)
-    torch.save(model.state_dict(), "recurrent_model.pth")
-    with open("best_params.json", "w") as f:
+    torch.save(model.state_dict(), os.path.join(models_dir, "recurrent_model.pth"))
+    with open(os.path.join(models_dir, "best_params.json"), "w") as f:
         json.dump(
             {"architecture": "final_model", "normalization": normalization_stats},
             f,

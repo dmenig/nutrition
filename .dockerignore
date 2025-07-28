@@ -1,0 +1,34 @@
+# Exclude Android app
+android_app/
+
+# Exclude plan directory
+plan/
+
+# Exclude tests directory
+tests/
+
+# Exclude Git-related files
+.git
+.gitignore
+
+# Exclude Python cache files
+*.pyc
+__pycache__/
+
+# Exclude environment files
+.env
+.env.local
+
+# Exclude documentation
+README.md
+
+# Exclude other unnecessary files/scripts
+*.md
+*.sh
+*.yml
+*.env*
+.vscode/
+.idea/
+venv/
+*.log
+*.DS_Store

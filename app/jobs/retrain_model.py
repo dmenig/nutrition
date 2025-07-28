@@ -42,7 +42,10 @@ def retrain_model_job():
 
         # Run the training logic
         model, best_params = train_and_save_model(
-            food_data_df, sport_data_df, model_path, params_path
+            food_data_df,
+            sport_data_df,
+            model_save_path=model_path,
+            params_save_path=params_path,
         )
 
         print("Model retraining completed successfully.")

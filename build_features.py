@@ -61,12 +61,11 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         new_columns[col] = new_col
     df.rename(columns=new_columns, inplace=True)
 
-
     print("--- Feature Building Complete ---")
     return df
 
 
-def main():
+def main(journal_path: str, variables_path: str):
     """
     Orchestrates the data processing to build features.
     """
@@ -74,8 +73,8 @@ def main():
 
     # Load data and calculate nutritional features
     features_df = data_processor.load_and_process_data(
-        journal_path="data/processed_journal.csv",
-        variables_path="data/variables.csv",
+        journal_path=journal_path,
+        variables_path=variables_path,
     )
 
     # Build features

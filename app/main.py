@@ -17,9 +17,11 @@ from app.schemas import (
 import pandas as pd
 import json
 import os
-import pickle
 from typing import Any
 from fastapi import BackgroundTasks
+import torch
+from train_model import FinalModel  # Import the model class
+import json  # Added import for json
 
 Base.metadata.create_all(bind=engine)
 
@@ -34,14 +36,53 @@ app.include_router(food_logs.router, prefix="", tags=["food-logs"])
 
 class PredictionService:
     model: Any = None
-    model_path: str = "/app/models/model.pkl"
+    model_path: str = "/app/models/recurrent_model.pth"
+    params_path: str = "/app/models/best_params.json"
+    normalization_stats: dict = {}  # Initialize normalization_stats
 
     def __init__(self):
         self.load_model()
 
     def load_model(self):
-        with open(self.model_path, "rb") as f:
-            self.model = pickle.load(f)
+        # Load normalization stats and initial weight guess from best_params.json
+        try:
+            with open(self.params_path, "r") as f:
+                params = json.load(f)
+                self.normalization_stats = params["normalization"]  # Store in self
+                # Assuming initial_weight_guess is part of normalization_stats or derived
+                # For now, we'll use a dummy value or derive it if needed.
+                # A more robust solution would save this with the model params.
+                # If 'pds' mean is available, we can use it as a proxy for initial_weight_guess
+                initial_weight_guess = (
+                    self.normalization_stats["pds"]["mean"]
+                    if "pds" in self.normalization_stats
+                    else 70.0
+                )  # Default if not found
+        except FileNotFoundError:
+            print(
+                f"Warning: {self.params_path} not found. Using default initial_weight_guess."
+            )
+            initial_weight_guess = 70.0  # Fallback default
+        except json.JSONDecodeError:
+            print(
+                f"Warning: Could not decode JSON from {self.params_path}. Using default initial_weight_guess."
+            )
+            initial_weight_guess = 70.0  # Fallback default
+
+        # Instantiate the model with appropriate parameters
+        # Assuming nutrition_input_size can be inferred or is a fixed value
+        # For now, let's use a placeholder. This needs to match the training model.
+        # From train_model.py, nutrition_input_size is nutrition_data.shape[2]
+        # which is len(nutrition_cols) = 6.
+        nutrition_input_size = 6
+        self.model = FinalModel(nutrition_input_size, initial_weight_guess)
+
+        # Load the state dictionary
+        # Use map_location=torch.device('cpu') to load CPU-only if trained on GPU
+        self.model.load_state_dict(
+            torch.load(self.model_path, map_location=torch.device("cpu"))
+        )
+        self.model.eval()  # Set model to evaluation mode
         print(f"Model loaded successfully from {self.model_path}")
 
     def predict(self, data: pd.DataFrame):
@@ -50,7 +91,60 @@ class PredictionService:
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Prediction model not loaded.",
             )
-        return self.model.predict(data).tolist()
+        # Assuming the input data needs to be converted to a tensor and normalized
+        # This part needs to be aligned with how the model expects its input during prediction
+        # For now, a placeholder for prediction.
+        # The actual prediction logic will be more complex, involving data normalization
+        # and tensor conversion similar to train_model.py
+        # return self.model.predict(data).tolist() # This line is incorrect for a PyTorch model
+
+        # Placeholder for actual prediction logic
+        # Convert pandas DataFrame to torch tensor
+        # Ensure data has the same columns and order as during training
+        # This is a simplified example and needs to be expanded based on actual model input
+
+        # Example: Assuming 'data' DataFrame contains the nutrition_cols
+        nutrition_cols = ["calories", "carbs", "sugar", "sel", "alcool", "water"]
+
+        # Ensure data has the correct columns, fill missing with 0, convert to numeric
+        for col in nutrition_cols:
+            if col not in data.columns:
+                data[col] = 0.0
+            data[col] = pd.to_numeric(data[col], errors="coerce").fillna(0)
+
+        # Normalize data using the loaded normalization_stats
+        normalized_data = data[nutrition_cols].copy()
+        for col in nutrition_cols:
+            if (
+                col in self.normalization_stats
+                and self.normalization_stats[col]["std"] != 0
+            ):
+                normalized_data[col] = (
+                    normalized_data[col] - self.normalization_stats[col]["mean"]
+                ) / self.normalization_stats[col]["std"]
+            else:
+                # Handle cases where std is 0 or stats are missing (e.g., for constant features)
+                normalized_data[col] = (
+                    normalized_data[col] - self.normalization_stats[col]["mean"]
+                )  # Just center it if std is 0
+
+        nutrition_tensor = torch.tensor(
+            normalized_data.values, dtype=torch.float32
+        ).unsqueeze(0)
+
+        with torch.no_grad():
+            # The FinalModel's forward method returns base_metabolisms
+            # We need to reconstruct the trajectory to get predicted weights
+            base_metabolisms = self.model(nutrition_tensor)
+
+            # To reconstruct trajectory, we also need observed_weights, sport_data, initial_adj_weight
+            # These would typically come from the context of the prediction request or be defaults.
+            # For a simple prediction endpoint, we might only predict metabolism or a single weight.
+            # If the goal is to predict a trajectory, more input is needed.
+
+            # For now, let's just return the base metabolisms as a placeholder for prediction output
+            # This needs to be refined based on what the /predict/latest endpoint is supposed to return.
+            return base_metabolisms.squeeze().tolist()
 
 
 prediction_service = PredictionService()

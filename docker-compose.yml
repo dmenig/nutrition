@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: >
+      bash -c "
+      export PYTHONPATH=/app &&
+      mkdir -p /app/models &&
+      uvicorn app.main:app --host 0.0.0.0 --port 8000
+      "
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/app/app
+      - ./data:/app/data
+      - ./models:/app/models
+    env_file:
+      - .env
+      - .env.local
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - app-network
+
+  init_db_and_model:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: >
+      bash -c "
+      export PYTHONPATH=/app &&
+      alembic upgrade head &&
+      python app/jobs/retrain_model.py
+      "
+    volumes:
+      - ./app:/app/app
+      - ./data:/app/data
+      - ./models:/app/models
+    env_file:
+      - .env
+      - .env.local
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - app-network
+
+  db:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-nutrition_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+
+networks:
+  app-network:
+    driver: bridge
