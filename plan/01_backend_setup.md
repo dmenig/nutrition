@@ -51,6 +51,6 @@ To establish a secure, well-structured, and auto-deploying backend service with 
     -   Installs dependencies, runs `pytest` against all unit tests for the new endpoints.
 -   **CD Workflow (`cd.yml`):**
     -   Triggers on push to `main`.
-    -   Builds and pushes the backend Docker image to Heroku's container registry.
-    -   Runs `alembic upgrade head` to apply any new database migrations.
+    -   Builds and pushes the backend Docker image to the GitHub Container Registry.
+    -   Runs `alembic upgrade head` to apply any new database migrations (on Neon).
     -   Releases the new version.

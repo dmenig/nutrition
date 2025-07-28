@@ -9,21 +9,20 @@ To have a fully automated, self-improving production system and a polished Andro
 
 ### **Tasks:**
 
-#### 5.1: Configure and Deploy to Heroku
+#### 5.1: Configure and Deploy to Render
 -   **Action:** Finalize the production deployment.
 -   **Details:**
-    -   Ensure all necessary environment variables are set in Heroku (e.g., `DATABASE_URL`, `SECRET_KEY`, `ADMIN_API_KEY`).
-    -   Push the `main` branch to trigger the CD pipeline, which will build, test, migrate the database, and deploy the backend.
-    -   Verify the deployment by checking the Heroku logs and hitting the API endpoints.
+    -   Follow the instructions in the [Migration from Heroku Guide](./06_migration_from_heroku.md) to set up the application on Render.
+    -   Ensure all necessary environment variables are set on Render (e.g., `DATABASE_URL` for Neon, `SECRET_KEY`, `ADMIN_API_KEY`).
+    -   Push the `main` branch to trigger the CD pipeline, which will build and push the image to GHCR and trigger a deployment on Render.
+    -   Verify the deployment by checking the Render logs and hitting the API endpoints.
 
 #### 5.2: Schedule Daily Model Retraining
--   **Action:** Use the Heroku Scheduler to automate the daily training job.
+-   **Action:** Use GitHub Actions to automate the daily training job.
 -   **Configuration:**
-    -   Add the Heroku Scheduler add-on to the application.
-    -   Create a new job in the scheduler dashboard.
-    -   **Command:** `python -m app.jobs.retrain_model`
-    -   **Frequency:** Set to run `Daily` at a specific time (e.g., 3:00 AM UTC).
--   **Monitoring:** Check the Heroku logs the next day to ensure the scheduled job ran successfully.
+    -   A new workflow file, [`.github/workflows/retrain.yml`](./.github/workflows/retrain.yml:1), will be created to handle the scheduled job.
+    -   This workflow will run daily at midnight UTC.
+-   **Monitoring:** Check the GitHub Actions logs to ensure the scheduled job ran successfully.
 
 #### 5.3: Build and Install the Final Android App
 -   **Action:** Generate a signed, release-ready APK.

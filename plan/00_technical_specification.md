@@ -14,11 +14,11 @@ graph TD
         A[Android App <br>- Kotlin & Jetpack Compose<br>- Room DB for Offline Cache<br>- Interactive Charts]
     end
 
-    subgraph "Cloud Hosting (Heroku)"
+    subgraph "Cloud Hosting"
         B[API Server <br>- FastAPI & Python<br>- Docker Container]
-        C[PostgreSQL Database <br>- Managed by Heroku Postgres]
+        C[PostgreSQL Database <br>- Managed by Neon]
         D[Live DL Model <br>- Loaded into API Server]
-        F[Heroku Scheduler] -- Triggers Daily --> G[Model Training Job]
+        F[Scheduled Jobs] -- Triggers Daily --> G[Model Training Job]
     end
 
     subgraph "External Services"
@@ -36,9 +36,9 @@ graph TD
 ### 1.2. Technology Stack
 
 -   **Backend:** **FastAPI** with Python.
--   **Database:** **PostgreSQL** on **Heroku Postgres** for reliability and managed operations.
--   **Hosting:** **Docker** container on **Heroku** for simple, scalable deployment.
--   **Scheduled Jobs:** **Heroku Scheduler** to trigger daily model retraining.
+- **Database:** **PostgreSQL** on **Neon** for reliability and managed operations.
+-   **Hosting:** **Docker** container on a cloud platform for simple, scalable deployment.
+-   **Scheduled Jobs:** **Scheduler** to trigger daily model retraining.
 -   **Android App:** **Kotlin** with **Jetpack Compose**, **Room** for a robust offline cache, **Retrofit** for API communication, and **MPAndroidChart** for interactive, native plotting.
 -   **Authentication:** **JWT** for stateless, secure authentication.
 

@@ -16,3 +16,8 @@ best_params.json
 loss_weights.json
 sensitivity_analysis.png
 model_analysis_plots.png
+
+# Android build outputs and caches
+android_app/java_pid1361541.hprof
+android_app/app/build/
+android_app/.gradle/
