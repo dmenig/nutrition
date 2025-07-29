@@ -36,8 +36,8 @@ app.include_router(food_logs.router, prefix="", tags=["food-logs"])
 
 class PredictionService:
     model: Any = None
-    model_path: str = "/app/models/recurrent_model.pth"
-    params_path: str = "/app/models/best_params.json"
+    model_path: str = "models/recurrent_model.pth"
+    params_path: str = "models/best_params.json"
     normalization_stats: dict = {}  # Initialize normalization_stats
 
     def __init__(self):
