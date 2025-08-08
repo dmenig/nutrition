@@ -79,7 +79,7 @@ fun NutritionApp() {
                     navController.navigate("food_entry/${foodLog.foodName}/1/g/${Date().time}")
                 },
                 onSportLogClick = { sportLog ->
-                    navController.navigate("sport_entry_route?activityName=${sportLog.activityName}&duration=${sportLog.durationMinutes}&caloriesExpended=${sportLog.caloriesBurned}")
+                    navController.navigate("sport_entry_route?activityName=${sportLog.activityName}&duration=${sportLog.durationMinutes}")
                 },
                 onNavigateToFoodEntry = { navController.navigate("food_entry_route") },
                 onNavigateToSportEntry = { navController.navigate("sport_entry_route") }
@@ -92,20 +92,17 @@ fun NutritionApp() {
             )
         }
         composable(
-            "sport_entry_route?activityName={activityName}&duration={duration}&caloriesExpended={caloriesExpended}",
+            "sport_entry_route?activityName={activityName}&duration={duration}",
             arguments = listOf(
                 navArgument("activityName") { type = NavType.StringType; nullable = true },
-                navArgument("duration") { type = NavType.StringType; nullable = true },
-                navArgument("caloriesExpended") { type = NavType.FloatType; defaultValue = 0f }
+                navArgument("duration") { type = NavType.StringType; nullable = true }
             )
         ) { backStackEntry ->
             val activityName = backStackEntry.arguments?.getString("activityName")
             val duration = backStackEntry.arguments?.getString("duration")
-            val caloriesExpended = backStackEntry.arguments?.getFloat("caloriesExpended")
             SportEntryRoute(
                 activityName = activityName,
                 duration = duration,
-                caloriesExpended = caloriesExpended,
                 onSave = { navController.popBackStack() },
                 onCancel = { navController.popBackStack() }
             )
@@ -124,15 +121,13 @@ fun NutritionApp() {
                 onCancel = { navController.popBackStack() }
             )
         }
-        composable("sport_entry/{activityName}/{duration}/{caloriesExpended}") { backStackEntry ->
+        composable("sport_entry/{activityName}/{duration}") { backStackEntry ->
             val activityName = backStackEntry.arguments?.getString("activityName") ?: ""
             val duration = backStackEntry.arguments?.getString("duration") ?: ""
-            val caloriesExpended = backStackEntry.arguments?.getString("caloriesExpended")?.toFloatOrNull() ?: 0f
 
             SportEntryRoute(
                 activityName = activityName,
                 duration = duration,
-                caloriesExpended = caloriesExpended,
                 onSave = { navController.popBackStack() },
                 onCancel = { navController.popBackStack() }
             )

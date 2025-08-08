@@ -45,7 +45,6 @@ class SportEntryViewModel @Inject constructor(
         activityName: String,
         loggedAt: LocalDateTime,
         durationMinutes: Int,
-        caloriesExpended: Float,
         carriedWeightKg: Float?,
         distanceM: Float?
     ) {
@@ -56,14 +55,14 @@ class SportEntryViewModel @Inject constructor(
                 SportActivity(
                     activityName = activityName,
                     durationMinutes = durationMinutes,
-                    caloriesBurned = caloriesExpended.toDouble(),
+                    caloriesBurned = 0.0,
                     date = localEpochMillis
                 )
             )
 
             // Attempt remote creation
             nutritionRepository.insertSportActivity(
-                activityName, loggedAt, durationMinutes, caloriesExpended, carriedWeightKg, distanceM
+                activityName, loggedAt, durationMinutes, carriedWeightKg, distanceM
             )
             _uiEvent.send(SportEntryUiEvent.SportActivitySaveSuccess)
         }

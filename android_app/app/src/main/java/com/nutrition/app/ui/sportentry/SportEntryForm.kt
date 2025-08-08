@@ -27,11 +27,10 @@ fun SportEntryForm(
     modifier: Modifier = Modifier,
     activityName: String? = "",
     duration: String? = "",
-    caloriesExpended: Float? = 0f,
     carriedWeight: String = "",
     distance: String = "",
     sportNames: List<String>,
-    onSave: (String, String, String?, String?, String) -> Unit,
+    onSave: (String, String, String?, String?) -> Unit,
     onCancel: () -> Unit
 ) {
     var selectedActivityName by remember(sportNames, activityName) {
@@ -40,7 +39,6 @@ fun SportEntryForm(
         )
     }
     var durationText by remember { mutableStateOf(duration ?: "") }
-    var caloriesExpendedText by remember { mutableStateOf(caloriesExpended?.toString() ?: "") }
     var carriedWeightText by remember { mutableStateOf(carriedWeight) }
     var distanceText by remember { mutableStateOf(distance) }
     var expanded by remember { mutableStateOf(false) }
@@ -98,14 +96,6 @@ fun SportEntryForm(
                 )
                 Spacer(modifier = Modifier.height(16.dp))
                 OutlinedTextField(
-                    value = caloriesExpendedText,
-                    onValueChange = { caloriesExpendedText = it },
-                    label = { Text("Calories Expended") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-                OutlinedTextField(
                     value = carriedWeightText,
                     onValueChange = { carriedWeightText = it },
                     label = { Text("Carried Weight (kg, optional)") },
@@ -134,8 +124,7 @@ fun SportEntryForm(
                             safeActivityName,
                             durationText,
                             carriedWeightText,
-                            distanceText,
-                            caloriesExpendedText
+                            distanceText
                         )
                     }) {
                         Text("Save")
