@@ -3,6 +3,7 @@ package com.nutrition.app.ui.dailylog
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nutrition.app.data.local.dao.DailyNutritionSummary
+import com.nutrition.app.data.remote.model.FoodLogResponse
 import com.nutrition.app.data.local.entities.FoodLog
 import com.nutrition.app.data.local.entities.SportActivity
 import com.nutrition.app.data.repository.NutritionRepository
@@ -14,10 +15,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.util.Date
 import javax.inject.Inject
+import java.time.ZoneId
+import java.time.LocalDate
+import java.time.LocalDateTime
 
 @HiltViewModel
 class DailyLogViewModel @Inject constructor(
-    private val repository: NutritionRepository
+    private val repository: NutritionRepository,
+    private val remoteRepository: com.nutrition.app.data.NutritionRepository
 ) : ViewModel() {
 
     private val _selectedDate = MutableStateFlow(Date())
@@ -62,5 +67,32 @@ class DailyLogViewModel @Inject constructor(
                 _sportLogs.value = sportActivities
             }
         }
+
+        // Remote pull for this day (dummy public endpoint) and upsert locally
+        viewModelScope.launch {
+            val localDate = date.toInstant().atZone(ZoneId.systemDefault()).toLocalDate()
+            val remoteLogs = try {
+                remoteRepository.fetchFoodLogsForDate(localDate).getOrNull()
+            } catch (e: Exception) { null }
+            if (!remoteLogs.isNullOrEmpty()) {
+                remoteLogs.forEach { rl: FoodLogResponse ->
+                    val epochMillis = toEpochMillis(rl.loggedAt)
+                    repository.insertFoodLog(
+                        FoodLog(
+                            foodName = rl.foodName,
+                            calories = rl.calories.toDouble(),
+                            protein = rl.protein.toDouble(),
+                            carbs = rl.carbs.toDouble(),
+                            fat = rl.fat.toDouble(),
+                            date = epochMillis,
+                            synced = true
+                        )
+                    )
+                }
+            }
+        }
     }
+
+    private fun toEpochMillis(dt: LocalDateTime): Long =
+        dt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
 }

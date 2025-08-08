@@ -4,7 +4,7 @@ from typing import List
 from datetime import datetime, date
 from sqlalchemy import func  # Import func for aggregation
 
-from app.db.models import FoodLog
+from app.db.models import FoodLog, User
 from app.schemas import (
     FoodLogCreate,
     FoodLogUpdate,
@@ -65,10 +65,61 @@ def get_food_logs_for_date(
 ):
     food_logs = (
         db.query(FoodLog)
-        .filter(FoodLog.user_id == current_user["id"], FoodLog.logged_at == date)
+        .filter(
+            FoodLog.user_id == current_user["id"],
+            func.date(FoodLog.logged_at) == date,
+        )
         .all()
     )
     return food_logs
+
+
+@router.get("/api/v1/logs/public", response_model=List[FoodLogOut])
+def get_food_logs_for_date_public(
+    date: date = Query(..., description="Date in YYYY-MM-DD format"),
+    db: Session = Depends(get_db),
+):
+    dummy_user = db.query(User).filter(User.email == "dummy@example.com").first()
+    if not dummy_user:
+        return []
+    food_logs = (
+        db.query(FoodLog)
+        .filter(
+            FoodLog.user_id == dummy_user.id,
+            func.date(FoodLog.logged_at) == date,
+        )
+        .all()
+    )
+    return food_logs
+
+
+@router.get("/api/v1/logs/summary/public", response_model=DailyFoodLogSummary)
+def get_daily_food_log_summary_public(
+    date: date = Query(..., description="Date in YYYY-MM-DD format"),
+    db: Session = Depends(get_db),
+):
+    dummy_user = db.query(User).filter(User.email == "dummy@example.com").first()
+    if not dummy_user:
+        return DailyFoodLogSummary(calories=0.0, protein_g=0.0, carbs_g=0.0, fat_g=0.0)
+
+    summary = (
+        db.query(
+            func.sum(FoodLog.calories).label("calories"),
+            func.sum(FoodLog.protein).label("protein_g"),
+            func.sum(FoodLog.carbs).label("carbs_g"),
+            func.sum(FoodLog.fat).label("fat_g"),
+        )
+        .filter(
+            FoodLog.user_id == dummy_user.id, func.date(FoodLog.logged_at) == date
+        )
+        .group_by(func.date(FoodLog.logged_at))
+        .first()
+    )
+
+    if not summary:
+        return DailyFoodLogSummary(calories=0.0, protein_g=0.0, carbs_g=0.0, fat_g=0.0)
+
+    return DailyFoodLogSummary(**summary._asdict())
 
 
 @router.put("/api/v1/logs/{log_id}", response_model=FoodLogOut)
