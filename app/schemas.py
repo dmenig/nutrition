@@ -1,5 +1,6 @@
 from pydantic import BaseModel, EmailStr
 from typing import Optional, Union
+from uuid import UUID
 
 
 class UserBase(BaseModel):
@@ -18,7 +19,7 @@ class UserInDB(UserBase):
 
 
 class UserOut(UserBase):
-    id: int
+    id: UUID
 
     class Config:
         from_attributes = True
@@ -31,9 +32,6 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     email: Optional[str] = None
-
-
-from uuid import UUID
 
 
 class CustomFoodBase(BaseModel):

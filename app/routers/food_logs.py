@@ -21,7 +21,7 @@ router = APIRouter()
 def get_daily_food_log_summary(
     date: date = Query(..., description="Date in YYYY-MM-DD format"),
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user = Depends(get_current_user),
 ):
     summary = (
         db.query(
@@ -31,7 +31,7 @@ def get_daily_food_log_summary(
             func.sum(FoodLog.fat).label("fat_g"),
         )
         .filter(
-            FoodLog.user_id == current_user["id"], func.date(FoodLog.logged_at) == date
+            FoodLog.user_id == current_user.id, func.date(FoodLog.logged_at) == date
         )
         .group_by(func.date(FoodLog.logged_at))
         .first()
@@ -48,9 +48,9 @@ def get_daily_food_log_summary(
 def create_food_log(
     food_log: FoodLogCreate,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user = Depends(get_current_user),
 ):
-    db_food_log = FoodLog(**food_log.dict(), user_id=current_user["id"])
+    db_food_log = FoodLog(**food_log.dict(), user_id=current_user.id)
     db.add(db_food_log)
     db.commit()
     db.refresh(db_food_log)
@@ -61,12 +61,12 @@ def create_food_log(
 def get_food_logs_for_date(
     date: date = Query(..., description="Date in YYYY-MM-DD format"),
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user = Depends(get_current_user),
 ):
     food_logs = (
         db.query(FoodLog)
         .filter(
-            FoodLog.user_id == current_user["id"],
+            FoodLog.user_id == current_user.id,
             func.date(FoodLog.logged_at) == date,
         )
         .all()
@@ -127,11 +127,11 @@ def update_food_log(
     log_id: str,
     food_log_update: FoodLogUpdate,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user = Depends(get_current_user),
 ):
     db_food_log = (
         db.query(FoodLog)
-        .filter(FoodLog.id == log_id, FoodLog.user_id == current_user["id"])
+        .filter(FoodLog.id == log_id, FoodLog.user_id == current_user.id)
         .first()
     )
     if not db_food_log:
@@ -149,11 +149,11 @@ def update_food_log(
 def delete_food_log(
     log_id: str,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user = Depends(get_current_user),
 ):
     db_food_log = (
         db.query(FoodLog)
-        .filter(FoodLog.id == log_id, FoodLog.user_id == current_user["id"])
+        .filter(FoodLog.id == log_id, FoodLog.user_id == current_user.id)
         .first()
     )
     if not db_food_log:

@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List
 from datetime import datetime
 from uuid import UUID
+from sqlalchemy import func
 
 from app import schemas
 from app.db.models import SportActivity, User
@@ -69,11 +70,12 @@ def get_sport_activities_by_date(
             detail="Invalid date format. Please use YYYY-MM-DD.",
         )
 
+    # Compare by date portion to include any time within the day
     sport_activities = (
         db.query(SportActivity)
         .filter(
             SportActivity.user_id == current_user.id,
-            SportActivity.logged_at == parsed_date,
+            func.date(SportActivity.logged_at) == parsed_date,
         )
         .all()
     )
