@@ -59,6 +59,32 @@ class DailyLogViewModel @Inject constructor(
         viewModelScope.launch {
             repository.getLogsForDay(startOfDay, endOfDay).collect { foodLogs ->
                 _foodLogs.value = foodLogs
+                if (foodLogs.isEmpty()) {
+                    // Fallback: fetch sample/public logs for demo if local is empty
+                    try {
+                        val localDate = date.toInstant().atZone(ZoneId.systemDefault()).toLocalDate()
+                        val remoteLogs = remoteRepository.fetchFoodLogsForDate(localDate).getOrNull()
+                        if (!remoteLogs.isNullOrEmpty()) {
+                            remoteLogs.forEach { rl: FoodLogResponse ->
+                                val epochMillis = toEpochMillis(rl.loggedAt)
+                                // Fix-up legacy demo data where quantity was interpreted as grams instead of 100g servings
+                                val needsRescale = rl.unit.lowercase() == "g" && rl.quantity <= 10f
+                                val factor = if (needsRescale) 100.0 else 1.0
+                                repository.insertFoodLog(
+                                    FoodLog(
+                                        foodName = rl.foodName,
+                                        calories = (rl.calories.toDouble() * factor),
+                                        protein = (rl.protein.toDouble() * factor),
+                                        carbs = (rl.carbs.toDouble() * factor),
+                                        fat = (rl.fat.toDouble() * factor),
+                                        date = epochMillis,
+                                        synced = true
+                                    )
+                                )
+                            }
+                        }
+                    } catch (_: Exception) { /* ignore demo fetch errors */ }
+                }
             }
         }
 
@@ -68,7 +94,7 @@ class DailyLogViewModel @Inject constructor(
             }
         }
 
-        // Remote public pull disabled to avoid polluting local summary with stale sample data
+        // No-op: remote sample pull happens on-demand in food logs collector when empty
     }
 
     private fun toEpochMillis(dt: LocalDateTime): Long =

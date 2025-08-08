@@ -231,12 +231,19 @@ def populate_food_log_table():
                     },
                 )
 
-                # Calculate nutritional values based on quantity (assuming quantity is in grams)
-                # The nutritional values in the CSV are per 100g, so we need to adjust for the actual quantity
-                calories = (nutrition["calories"] / 100) * quantity
-                protein = (nutrition["protein"] / 100) * quantity
-                carbs = (nutrition["carbs"] / 100) * quantity
-                fat = (nutrition["fat"] / 100) * quantity
+                # Interpret quantities:
+                # - If quantity is a small number (<= 10), treat it as "number of 100g servings"
+                #   to avoid defaulting bare items (e.g., "pain") to 1 gram.
+                # - Otherwise assume it is already in grams.
+                quantity_in_grams = quantity * 100 if quantity <= 10 else quantity
+
+                # The nutritional values in the CSV are per 100g.
+                # Scale by (grams / 100) to compute actual amounts.
+                scale = quantity_in_grams / 100
+                calories = nutrition["calories"] * scale
+                protein = nutrition["protein"] * scale
+                carbs = nutrition["carbs"] * scale
+                fat = nutrition["fat"] * scale
 
                 # Create a FoodLog entry
                 food_log = FoodLog(

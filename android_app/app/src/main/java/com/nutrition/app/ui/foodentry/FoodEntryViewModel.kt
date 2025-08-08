@@ -33,9 +33,9 @@ class FoodEntryViewModel @Inject constructor(
             val food = nutritionRepository.searchFoods(foodName).getOrNull()?.firstOrNull()
             if (food != null) {
                 val parsedQuantity = quantity.toFloatOrNull() ?: 0f
-                // Heuristic: if quantity looks like a small number (< 10), interpret it as
-                // number of 100g servings to match common user input like "1".
-                val quantityInGrams = if (parsedQuantity in 0f..10f) parsedQuantity * 100f else parsedQuantity
+                // Heuristic aligned with backend/demo population:
+                // If quantity <= 10, interpret as number of 100g servings; else treat as grams.
+                val quantityInGrams = if (parsedQuantity <= 10f) parsedQuantity * 100f else parsedQuantity
                 // Nutriments from backend are per 100g. Quantity is in grams.
                 // Scale per-100g values by (grams / 100) to get actual nutrient amounts.
                 val scale = quantityInGrams / 100f
@@ -58,8 +58,9 @@ class FoodEntryViewModel @Inject constructor(
                 )
 
                 // Attempt remote creation
+                // Send normalized quantity and unit to backend
                 val result = nutritionRepository.insertFoodLog(
-                    foodName, parsedQuantity, "g", loggedAt, calories, protein, carbs, fat
+                    foodName, quantityInGrams, "g", loggedAt, calories, protein, carbs, fat
                 )
                 if (result.isSuccess) {
                     _uiEvent.send(FoodEntryUiEvent.FoodLogSaveSuccess)
