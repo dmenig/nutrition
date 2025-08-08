@@ -57,3 +57,13 @@ class CustomFood(Base):
     fat_per_100g = Column(Float)
 
     user = relationship("User")
+
+
+class Food(Base):
+    __tablename__ = "foods"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String, unique=True, index=True, nullable=False)
+    calories = Column(Float)
+    protein = Column(Float)
+    carbs = Column(Float)
+    fat = Column(Float)

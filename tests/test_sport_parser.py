@@ -15,8 +15,6 @@ TEST_CASES = [
     ),
     # Formula with different weight
     ("WALKING_CALORIES(60, 75, 8000, 2)", 500.5),
-    # Formula with zero values
-    ("WALKING_CALORIES(0, 70, 0, 0)", 0.0),
 ]
 
 # Test cases that are expected to raise an error.
@@ -32,8 +30,14 @@ ERROR_CASES = [
     ),
     # Incorrect number of arguments
     ("WALKING_CALORIES(60, 70)", TypeError, "missing 2 required positional arguments"),
+    # Duration <= 0
+    ("WALKING_CALORIES(0, 70, 0, 0)", ValueError, "Duration must be greater than 0"),
     # Malformed expression
-    ("WALKING_CALORIES(60, 70, 7000, 3) +", SyntaxError, "invalid syntax"),
+    (
+        "WALKING_CALORIES(60, 70, 7000, 3) +",
+        SyntaxError,
+        "invalid syntax",
+    ),
     # Unsafe code
     (
         "__import__('os').system('echo unsafe')",

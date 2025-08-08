@@ -1,6 +1,0 @@
----
-alwaysApply: true
----
-- Always run your python commands in the .venv environnement in the current directory. If needed, activate .venv.
-- Put debug prints only in case of an exception ! 
-- Never apply a patch to an exception by returning pd.NA or "" or 0. All exceptions should make the scripts fail !

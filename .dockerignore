@@ -25,6 +25,3 @@ android_app/
 
 # Exclude plan directory
 plan/
-
-# Exclude tests directory
-tests/

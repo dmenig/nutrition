@@ -1,11 +1,28 @@
 package com.nutrition.app.ui.dailylog
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Card
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -20,7 +37,9 @@ fun DailyLogScreen(
     modifier: Modifier = Modifier,
     viewModel: DailyLogViewModel = hiltViewModel(),
     onFoodLogClick: (FoodLog) -> Unit = {},
-    onSportLogClick: (SportActivity) -> Unit = {}
+    onSportLogClick: (SportActivity) -> Unit = {},
+    onNavigateToFoodEntry: () -> Unit = {},
+    onNavigateToSportEntry: () -> Unit = {}
 ) {
     val selectedDate by viewModel.selectedDate.collectAsState()
     val dailySummary by viewModel.dailySummary.collectAsState()
@@ -32,74 +51,105 @@ fun DailyLogScreen(
             TopAppBar(title = { Text("Daily Log") })
         }
     ) { paddingValues ->
-        Column(
-            modifier = modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .padding(16.dp)
-        ) {
-            // Calendar View
-            CalendarView(
-                selectedDate = selectedDate,
-                onDateSelected = { date -> viewModel.selectDate(date) },
-                modifier = Modifier.fillMaxWidth()
-            )
+        Box(modifier = modifier.fillMaxSize().padding(paddingValues)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp)
+            ) {
+                // Calendar View
+                CalendarView(
+                    selectedDate = selectedDate,
+                    onDateSelected = { date -> viewModel.selectDate(date) },
+                    modifier = Modifier.fillMaxWidth()
+                )
 
-            Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
-            // Daily Summary Section (Placeholder for now)
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Daily Summary:")
-                    Text("Calories: ${dailySummary?.totalCalories ?: "N/A"}")
-                    Text("Protein: ${dailySummary?.totalProtein ?: "N/A"}")
-                    Text("Carbs: ${dailySummary?.totalCarbs ?: "N/A"}")
-                    Text("Fat: ${dailySummary?.totalFat ?: "N/A"}")
+                // Daily Summary Section (Placeholder for now)
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("Daily Summary:")
+                        Text("Calories: ${dailySummary?.totalCalories ?: "N/A"}")
+                        Text("Protein: ${dailySummary?.totalProtein ?: "N/A"}")
+                        Text("Carbs: ${dailySummary?.totalCarbs ?: "N/A"}")
+                        Text("Fat: ${dailySummary?.totalFat ?: "N/A"}")
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Paginated List of Food and Sport Logs
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(vertical = 8.dp)
+                ) {
+                    item {
+                        Text("Food Logs:", style = MaterialTheme.typography.titleMedium)
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                    items(foodLogs) { log ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                                .clickable { onFoodLogClick(log) }
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text(text = log.foodName, style = MaterialTheme.typography.bodyLarge)
+                                Text(text = "${log.calories} kcal", style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+
+                    item {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("Sport Logs:", style = MaterialTheme.typography.titleMedium)
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                    items(sportLogs) { log ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                                .clickable { onSportLogClick(log) }
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text(text = log.activityName, style = MaterialTheme.typography.bodyLarge)
+                                Text(text = "${log.durationMinutes} min", style = MaterialTheme.typography.bodySmall)
+                            }
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(16.dp),
+                                verticalArrangement = Arrangement.Bottom,
+                                horizontalAlignment = Alignment.End
+                            ) {
+                                FloatingActionButton(onClick = onNavigateToFoodEntry) {
+                                    Text("Add Food")
+                                }
+                                Spacer(modifier = Modifier.height(16.dp))
+                                FloatingActionButton(onClick = onNavigateToSportEntry) {
+                                    Text("Add Sport")
+                                }
+                            }
+                        }
+                    }
                 }
             }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Paginated List of Food and Sport Logs
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(vertical = 8.dp)
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.Bottom,
+                horizontalAlignment = Alignment.End
             ) {
-                item {
-                    Text("Food Logs:", style = MaterialTheme.typography.titleMedium)
-                    Spacer(modifier = Modifier.height(8.dp))
+                FloatingActionButton(onClick = onNavigateToFoodEntry) {
+                    Text("Add Food")
                 }
-                items(foodLogs) { log ->
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp)
-                            .clickable { onFoodLogClick(log) }
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text(text = log.foodName, style = MaterialTheme.typography.bodyLarge)
-                            Text(text = "${log.calories} kcal", style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-                }
-
-                item {
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text("Sport Logs:", style = MaterialTheme.typography.titleMedium)
-                    Spacer(modifier = Modifier.height(8.dp))
-                }
-                items(sportLogs) { log ->
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp)
-                            .clickable { onSportLogClick(log) }
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text(text = log.activityName, style = MaterialTheme.typography.bodyLarge)
-                            Text(text = "${log.durationMinutes} min", style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
+                Spacer(modifier = Modifier.height(16.dp))
+                FloatingActionButton(onClick = onNavigateToSportEntry) {
+                    Text("Add Sport")
                 }
             }
         }

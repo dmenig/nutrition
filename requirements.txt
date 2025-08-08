@@ -8,6 +8,9 @@ passlib[bcrypt]
 python-multipart
 pydantic[email]
 
+pytest
+httpx
+
 pydantic-settings
 
 pandas

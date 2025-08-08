@@ -3,6 +3,9 @@ package com.nutrition.app.util
 import androidx.room.TypeConverter
 import java.util.Calendar
 import java.util.Date
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneId
 
 class DateConverter {
     @TypeConverter
@@ -36,4 +39,10 @@ fun Long.atEndOfDay(): Long {
         set(Calendar.MILLISECOND, 999)
     }
     return calendar.timeInMillis
+}
+
+fun Date.toLocalDateTime(): LocalDateTime {
+    return Instant.ofEpochMilli(this.time)
+        .atZone(ZoneId.systemDefault())
+        .toLocalDateTime()
 }

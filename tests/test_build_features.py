@@ -6,7 +6,6 @@ from unittest.mock import patch, call
 
 # Add project root to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
 from build_features import main as build_features_main
 from sport_formulas import WALKING_CALORIES, RUNNING_CALORIES
 from data_processor import normalize_food_names
@@ -18,6 +17,10 @@ def test_build_features_end_to_end():
     This test mocks the file system and verifies the entire data processing pipeline
     from dummy input files to the final features DataFrame.
     """
+    # Mock the journal_path and variables_path arguments
+    journal_path = "dummy_journal.csv"
+    variables_path = "dummy_variables.csv"
+
     # 1. Create dummy dataframes in memory
     variables_df = pd.DataFrame(
         {
@@ -77,6 +80,7 @@ def test_build_features_end_to_end():
     with (
         patch("pandas.read_csv") as mock_read_csv,
         patch("pandas.DataFrame.to_csv") as mock_to_csv,
+        patch("os.path.exists") as mock_exists,
     ):
         # Configure the mock to return different dataframes based on the file path
         def read_csv_side_effect(filepath):
@@ -87,9 +91,10 @@ def test_build_features_end_to_end():
             return pd.DataFrame()
 
         mock_read_csv.side_effect = read_csv_side_effect
+        mock_exists.return_value = True
 
         # 3. Run the main script
-        result_df = build_features_main()
+        result_df = build_features_main(journal_path, variables_path)
 
     # 4. Assertions
     assert result_df is not None
@@ -129,30 +134,14 @@ def test_build_features_end_to_end():
     proteine1 = (
         150 * (13.4 * pain_complet_ratio + 21.6 * fromage_chevre_ratio) + 200 * 27.0
     )
-    fat1 = (
-        150 * (3.2 * pain_complet_ratio + 29.8 * fromage_chevre_ratio) + 200 * 14.0
-    )
-    sfat1 = (
-        150 * (0.7 * pain_complet_ratio + 20.2 * fromage_chevre_ratio) + 200 * 3.8
-    )
-    carbs1 = (
-        150 * (41.3 * pain_complet_ratio + 1.3 * fromage_chevre_ratio) + 200 * 0
-    )
-    sugar1 = (
-        150 * (5.4 * pain_complet_ratio + 0.5 * fromage_chevre_ratio) + 200 * 0
-    )
-    free_sugar1 = (
-        150 * (1.0 * pain_complet_ratio + 0 * fromage_chevre_ratio) + 200 * 0
-    )
-    fibres1 = (
-        150 * (6.0 * pain_complet_ratio + 0 * fromage_chevre_ratio) + 200 * 0
-    )
-    sel1 = (
-        150 * (1.4 * pain_complet_ratio + 1.8 * fromage_chevre_ratio) + 200 * 0.2
-    )
-    alcool1 = (
-        150 * (0 * pain_complet_ratio + 0 * fromage_chevre_ratio) + 200 * 0
-    )
+    fat1 = 150 * (3.2 * pain_complet_ratio + 29.8 * fromage_chevre_ratio) + 200 * 14.0
+    sfat1 = 150 * (0.7 * pain_complet_ratio + 20.2 * fromage_chevre_ratio) + 200 * 3.8
+    carbs1 = 150 * (41.3 * pain_complet_ratio + 1.3 * fromage_chevre_ratio) + 200 * 0
+    sugar1 = 150 * (5.4 * pain_complet_ratio + 0.5 * fromage_chevre_ratio) + 200 * 0
+    free_sugar1 = 150 * (1.0 * pain_complet_ratio + 0 * fromage_chevre_ratio) + 200 * 0
+    fibres1 = 150 * (6.0 * pain_complet_ratio + 0 * fromage_chevre_ratio) + 200 * 0
+    sel1 = 150 * (1.4 * pain_complet_ratio + 1.8 * fromage_chevre_ratio) + 200 * 0.2
+    alcool1 = 150 * (0 * pain_complet_ratio + 0 * fromage_chevre_ratio) + 200 * 0
     water1 = (
         150 * (35.0 * pain_complet_ratio + 45.0 * fromage_chevre_ratio) + 200 * 60.0
     )
@@ -174,32 +163,32 @@ def test_build_features_end_to_end():
     )
 
     # Row 2
-    calories2 = (100 * 364 + 50 * 387)
-    proteine2 = (100 * 10.3 + 50 * 0)
-    fat2 = (100 * 1.0 + 50 * 0)
-    sfat2 = (100 * 0.2 + 50 * 0)
-    carbs2 = (100 * 76.3 + 50 * 100)
-    sugar2 = (100 * 0.3 + 50 * 100)
-    free_sugar2 = (100 * 0 + 50 * 100)
-    fibres2 = (100 * 2.7 + 50 * 0)
-    sel2 = (100 * 0.01 + 50 * 0)
-    alcool2 = (100 * 0 + 50 * 0)
-    water2 = (100 * 12.0 + 50 * 0)
+    calories2 = 100 * 364 + 50 * 387
+    proteine2 = 100 * 10.3 + 50 * 0
+    fat2 = 100 * 1.0 + 50 * 0
+    sfat2 = 100 * 0.2 + 50 * 0
+    carbs2 = 100 * 76.3 + 50 * 100
+    sugar2 = 100 * 0.3 + 50 * 100
+    free_sugar2 = 100 * 0 + 50 * 100
+    fibres2 = 100 * 2.7 + 50 * 0
+    sel2 = 100 * 0.01 + 50 * 0
+    alcool2 = 100 * 0 + 50 * 0
+    water2 = 100 * 12.0 + 50 * 0
     sport2 = 0
 
     # Row 3
     weight3 = 80.1
-    calories3 = (10 * 40 + 0.682 * (259 * 0.8 + 239 * 0.2))
-    proteine3 = (10 * 0 + 0.682 * (13.4 * 0.8 + 27.0 * 0.2))
-    fat3 = (10 * 0 + 0.682 * (3.2 * 0.8 + 14.0 * 0.2))
-    sfat3 = (10 * 0 + 0.682 * (0.7 * 0.8 + 3.8 * 0.2))
-    carbs3 = (10 * 10.6 + 0.682 * (41.3 * 0.8 + 0 * 0.2))
-    sugar3 = (10 * 10.6 + 0.682 * (5.4 * 0.8 + 0 * 0.2))
-    free_sugar3 = (10 * 10.6 + 0.682 * (1.0 * 0.8 + 0 * 0.2))
-    fibres3 = (10 * 0 + 0.682 * (6.0 * 0.8 + 0 * 0.2))
-    sel3 = (10 * 0.01 + 0.682 * (1.4 * 0.8 + 0.2 * 0.2))
-    alcool3 = (10 * 0.5 + 0.682 * (0 * 0.8 + 0 * 0.2))
-    water3 = (10 * 88.0 + 0.682 * (35.0 * 0.8 + 60.0 * 0.2))
+    calories3 = 10 * 40 + 0.682 * (259 * 0.8 + 239 * 0.2)
+    proteine3 = 10 * 0 + 0.682 * (13.4 * 0.8 + 27.0 * 0.2)
+    fat3 = 10 * 0 + 0.682 * (3.2 * 0.8 + 14.0 * 0.2)
+    sfat3 = 10 * 0 + 0.682 * (0.7 * 0.8 + 3.8 * 0.2)
+    carbs3 = 10 * 10.6 + 0.682 * (41.3 * 0.8 + 0 * 0.2)
+    sugar3 = 10 * 10.6 + 0.682 * (5.4 * 0.8 + 0 * 0.2)
+    free_sugar3 = 10 * 10.6 + 0.682 * (1.0 * 0.8 + 0 * 0.2)
+    fibres3 = 10 * 0 + 0.682 * (6.0 * 0.8 + 0 * 0.2)
+    sel3 = 10 * 0.01 + 0.682 * (1.4 * 0.8 + 0.2 * 0.2)
+    alcool3 = 10 * 0.5 + 0.682 * (0 * 0.8 + 0 * 0.2)
+    water3 = 10 * 88.0 + 0.682 * (35.0 * 0.8 + 60.0 * 0.2)
     sport3 = WALKING_CALORIES(
         duration_minutes=3600,
         distance_meters=15000,
@@ -224,17 +213,17 @@ def test_build_features_end_to_end():
     sport4 = 10 * 10
 
     # Row 5
-    calories5 = (100 * 150)
-    proteine5 = (100 * 2.0)
-    fat5 = (100 * 12.0)
-    sfat5 = (100 * 1.5)
-    carbs5 = (100 * 5.0)
-    sugar5 = (100 * 3.0)
-    free_sugar5 = (100 * 0.5)
-    fibres5 = (100 * 4.0)
-    sel5 = (100 * 1.2)
-    alcool5 = (100 * 0)
-    water5 = (100 * 75.0)
+    calories5 = 100 * 150
+    proteine5 = 100 * 2.0
+    fat5 = 100 * 12.0
+    sfat5 = 100 * 1.5
+    carbs5 = 100 * 5.0
+    sugar5 = 100 * 3.0
+    free_sugar5 = 100 * 0.5
+    fibres5 = 100 * 4.0
+    sel5 = 100 * 1.2
+    alcool5 = 100 * 0
+    water5 = 100 * 75.0
     sport5 = 0
 
     # Assert calculated values are close to expected values

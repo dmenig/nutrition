@@ -3,10 +3,10 @@ package com.nutrition.app.di
 import android.content.Context
 import androidx.room.Room
 import com.nutrition.app.data.local.database.NutritionDatabase
+import com.nutrition.app.data.remote.NutritionApi
 import com.nutrition.app.data.remote.NutritionApiService
-import com.nutrition.app.data.remote.OpenFoodFactsApi
 import com.nutrition.app.data.repository.NutritionRepository
-import com.nutrition.app.data.repository.OpenFoodFactsRepository
+import com.nutrition.app.data.NutritionRepository as RemoteNutritionRepository
 import com.nutrition.app.data.local.dao.CustomFoodDao
 import com.nutrition.app.data.local.dao.FoodLogDao
 import com.nutrition.app.data.local.dao.SportActivityDao
@@ -17,6 +17,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
+import java.util.concurrent.TimeUnit
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import javax.inject.Singleton
@@ -60,6 +61,10 @@ object AppModule {
         }
         return OkHttpClient.Builder()
             .addInterceptor(logging)
+            .connectTimeout(2, TimeUnit.SECONDS)
+            .readTimeout(2, TimeUnit.SECONDS)
+            .callTimeout(3, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(false)
             .build()
     }
 
@@ -77,38 +82,14 @@ object AppModule {
 
     @Provides
     @Singleton
-    @Named("OpenFoodFactsApi")
-    fun provideOpenFoodFactsRetrofit(okHttpClient: OkHttpClient): Retrofit {
-        return Retrofit.Builder()
-            .baseUrl("https://world.openfoodfacts.org/api/v0/")
-            .client(okHttpClient)
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-    }
-
-    @Provides
-    @Singleton
     fun provideNutritionApiService(@Named("NutritionApi") retrofit: Retrofit): NutritionApiService {
         return retrofit.create(NutritionApiService::class.java)
     }
 
     @Provides
     @Singleton
-    fun provideOpenFoodFactsApiService(@Named("OpenFoodFactsApi") retrofit: Retrofit): OpenFoodFactsApi {
-        return retrofit.create(OpenFoodFactsApi::class.java)
-    }
-
-
-    @Provides
-    @Singleton
     fun provideWorkManager(@ApplicationContext context: Context): WorkManager {
         return WorkManager.getInstance(context)
-    }
-
-    @Provides
-    @Singleton
-    fun provideOpenFoodFactsRepository(api: OpenFoodFactsApi): OpenFoodFactsRepository {
-        return OpenFoodFactsRepository(api)
     }
 
     @Provides
@@ -125,5 +106,11 @@ object AppModule {
             customFoodDao = customFoodDao,
             apiService = apiService
         )
+    }
+
+    @Provides
+    @Singleton
+    fun provideRemoteNutritionRepository(nutritionApi: NutritionApi): RemoteNutritionRepository {
+        return RemoteNutritionRepository(nutritionApi)
     }
 }

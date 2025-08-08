@@ -1,32 +1,159 @@
-# Nutrition Tracker
+## Nutrition Android App — Quick Context
 
-This is a nutrition tracking application.
+High-level notes to help an LLM (or a developer) locate things fast and build an APK without reading the whole codebase.
 
-## Local Development with Docker Compose
+### Build APK
+- **Prereqs**: Android Studio Giraffe/Koala+ (AGP 8.x), JDK 17, Android SDK 34.
+- **From CLI**:
+  - Debug APK: `./gradlew assembleDebug`
+  - Install on device/emulator: `./gradlew installDebug`
+  - Unsigned release APK: `./gradlew assembleRelease`
+    - To produce a signed release, add a signing config in `android_app/app/build.gradle` and set it on `buildTypes.release`.
+- **From Android Studio**: Open the `android_app/` module directory, then Build > Make Project or Build APK(s).
 
-To set up a local development environment that mirrors the Render production setup, follow these steps:
+Notes:
+- A debug keystore is generated automatically if missing (see `android_app/app/build.gradle` `preBuild` task).
+- Min SDK 24, Target SDK 34. Application ID: `com.nutrition.app`.
 
-### Prerequisites
-*   Docker installed on your machine.
+### Backend/API Base URL
+- Defined in `android_app/app/src/main/java/com/nutrition/app/di/AppModule.kt` inside `provideRetrofit(...)` via `.baseUrl("...")`.
+- Default: `https://nutrition-tbdo.onrender.com/`.
+- For emulator + local backend use: `http://10.0.2.2:<port>/`.
+- Cleartext traffic is allowed in `AndroidManifest.xml` (`android:usesCleartextTraffic="true"`).
 
-### Building and Running the Application
+### Key Entry Points
+- `android_app/app/src/main/AndroidManifest.xml`: app config, permissions (Camera, Internet), `MainActivity` launcher, `NutritionApplication`.
+- `android_app/app/src/main/java/com/nutrition/app/MainActivity.kt`: sets up Compose navigation and enqueues periodic `WorkManager` sync.
+- `android_app/app/src/main/java/com/nutrition/app/NutritionApplication.kt`: Hilt application class (if present in codebase).
 
-1.  **Build the Docker images:**
-    Open your terminal in the project's root directory and run:
-    ```bash
-    docker-compose build
-    ```
-    This command will build the Docker image for the FastAPI backend based on the `Dockerfile` in the current directory.
+### Dependency Injection (Hilt)
+- `android_app/app/src/main/java/com/nutrition/app/di/`
+  - `AppModule.kt`: Room DB, OkHttp, Retrofit (base URL), repository wiring, `WorkManager`.
+  - `NetworkModule.kt`: Creates `NutritionApi` from the Retrofit instance (named `"NutritionApi"`).
+  - `PlotsModule.kt`: Creates `PlotsApiService` from the same Retrofit instance.
 
-2.  **Run the application:**
-    Start the backend and database services by running:
-    ```bash
-    docker-compose up
-    ```
-    This command will start the PostgreSQL database and the FastAPI backend. The backend will automatically connect to the database using the credentials and URL defined in the `.env` file.
+### UI & Navigation (Jetpack Compose)
+- `android_app/app/src/main/java/com/nutrition/app/ui/`
+  - `dailylog/`: `DailyLogScreen` and view model for the home/log view.
+  - `foodentry/`: `FoodEntryRoute`, `FoodEntryForm`, barcode scanning (`BarcodeScanActivity`) with CameraX + ML Kit.
+  - `sportentry/`: sport entry route and form.
+  - `customfood/`: create/view custom foods.
+  - `plots/`: charts (MPAndroidChart) and date range utilities.
+  - `theme/`: colors, typography, theme setup.
 
-### Stopping the Application
+### Data Layer & Sync
+- `android_app/app/src/main/java/com/nutrition/app/data/`: repositories, Retrofit service interfaces, and Room entities/DAOs (see DAOs provided in `AppModule`).
+- `android_app/app/src/main/java/com/nutrition/app/sync/SyncWorker.kt`: periodic background sync via `WorkManager` scheduled in `MainActivity`.
 
-To stop the running Docker containers, press `Ctrl+C` in the terminal where `docker-compose up` is running, or run the following command in a new terminal:
-```bash
-docker-compose down
+### Utilities
+- `android_app/app/src/main/java/com/nutrition/app/util/`: helpers such as `DateConverter`.
+
+### Resources
+- `android_app/app/src/main/res/`: layouts (for Camera preview), drawables (marker bg), strings, themes, and `xml/` for backup/data extraction rules.
+
+### Gradle & Tooling
+- Project settings: `android_app/settings.gradle`, root `android_app/build.gradle` (AGP/Kotlin/Hilt/KSP), module `android_app/app/build.gradle` (Compose, CameraX, ML Kit, Room, WorkManager, Retrofit, MPAndroidChart).
+- Compose is enabled with BOM; Kotlin compiler extension set in `composeOptions`.
+
+### Tests
+- Instrumented UI tests: `android_app/app/src/androidTest/java/com/nutrition/app/ui/...`
+  - Run on device/emulator: `./gradlew connectedDebugAndroidTest`.
+- Unit tests (if present under `test/`): `./gradlew testDebugUnitTest`.
+
+### Common Tasks
+- Update backend URL: edit `AppModule.provideRetrofit` `.baseUrl(...)` and rebuild.
+- Add a new screen: place Composables under `ui/<feature>/` and add a route in `MainActivity` `NavHost`.
+- Add an API: define service interface under `data/remote`, provide it in a DI module using the named Retrofit, inject into a repository/view model.
+
+
+### Android Emulator (AVD) setup
+
+- **Install SDK tools (one-time)**
+  ```bash
+  export ANDROID_SDK_ROOT=$HOME/Android/Sdk ANDROID_HOME=$ANDROID_SDK_ROOT
+  mkdir -p "$ANDROID_SDK_ROOT"
+  yes | sdkmanager --sdk_root="$ANDROID_SDK_ROOT" \
+    "cmdline-tools;latest" "platform-tools" "emulator" \
+    "platforms;android-34" "build-tools;34.0.0" \
+    "system-images;android-34;default;x86_64"
+  yes | sdkmanager --licenses --sdk_root="$ANDROID_SDK_ROOT"
+  ```
+
+- **Create an AVD (Android 34, x86_64)**
+  ```bash
+  echo no | avdmanager create avd -n nutrition_avd \
+    -k "system-images;android-34;default;x86_64" -c 2048M --force
+  ```
+
+- **Start the emulator** (headless example)
+  ```bash
+  $ANDROID_SDK_ROOT/emulator/emulator -avd nutrition_avd \
+    -no-window -no-boot-anim -gpu swiftshader_indirect -no-snapshot
+  ```
+
+- **Install and launch the app**
+  ```bash
+  cd android_app && ./gradlew installDebug
+  adb shell monkey -p com.nutrition.app -c android.intent.category.LAUNCHER 1
+  ```
+
+- **Useful commands**
+  - List devices: `adb devices`
+  - View logs: `adb -s <emulator-serial> logcat`
+  - Stop emulator: `adb -s <emulator-serial> emu kill`
+
+- **Backend note**
+  - Default base URL is production (set in `android_app/app/src/main/java/com/nutrition/app/di/AppModule.kt`). Actions in the emulator will affect prod data.
+  - To use a local backend from the emulator, set `.baseUrl("http://10.0.2.2:<port>/")` in `AppModule.provideRetrofit` and rebuild.
+
+
+### ADB over TCP/IP via Tailscale (wireless install)
+
+Use this to install/run the Android app on a physical phone over its Tailscale IP, without a USB cable after initial setup.
+
+- **Prerequisites**
+  - Phone has the Tailscale app connected (you should see a `100.x.x.x` address on the device).
+  - Developer options enabled and USB debugging turned on.
+  - `adb` installed on your workstation.
+
+- **Build the APK**
+  - From repo root: `cd android_app && ./gradlew assembleDebug`
+  - APK path: `android_app/app/build/outputs/apk/debug/app-debug.apk`
+
+- **Enable ADB over TCP/IP (one-time per session via USB)**
+  - Verify USB connection: `adb devices` (should list your device as `device`).
+  - Switch to TCP/IP on port 5555: `adb tcpip 5555`
+
+- **Find the phone’s Tailscale IP**
+  - Easiest via ADB: `adb shell ip -o addr show | grep -E '100\\.'`
+    - On many devices, Tailscale shows on `tun0` with an address like `100.115.x.y/32`.
+  - Alternatives:
+    - On the phone, open the Tailscale app and copy the `100.x.x.x` address.
+    - If you have a shell on device: `adb shell ip -o addr show dev tun0`.
+
+- **Connect over Tailscale**
+  - `adb connect <TAILSCALE_IP>:5555`
+  - Verify: `adb devices` should show `<TAILSCALE_IP>:5555    device` (USB entry may still appear until unplugged).
+
+- **Install the APK over the network**
+  - `adb -s <TAILSCALE_IP>:5555 install -r -d android_app/app/build/outputs/apk/debug/app-debug.apk`
+    - `-r`: reinstall if present
+    - `-d`: allow versionCode downgrade (useful for debug builds)
+    - Optional: `-g` to auto-grant runtime permissions on install
+
+- **Launch the app**
+  - `adb -s <TAILSCALE_IP>:5555 shell am start -n com.nutrition.app/.MainActivity`
+
+- **Disconnect (optional)**
+  - `adb disconnect <TAILSCALE_IP>:5555`
+  - To stop TCP/IP mode (revert to USB): reconnect via USB, then `adb usb`
+
+- **Troubleshooting**
+  - If install seems to hang:
+    - Reset ADB: `adb disconnect && adb kill-server && adb start-server` then `adb connect <TAILSCALE_IP>:5555` and retry.
+    - Try pushing then installing via package manager:
+      - `adb -s <IP:PORT> push android_app/app/build/outputs/apk/debug/app-debug.apk /data/local/tmp/app-debug.apk`
+      - `adb -s <IP:PORT> shell pm install -r -d /data/local/tmp/app-debug.apk`
+    - Ensure the phone is reachable on `<TAILSCALE_IP>:5555` (Tailscale is connected and not asleep). Re-run `adb tcpip 5555` over USB if needed.
+    - On Android 12+ using Wireless debugging UI instead of `tcpip`, you may need pairing: `adb pair <IP:PAIRING_PORT>` and enter the pairing code from the phone; then `adb connect <IP:PORT>`.
+  - Security note: disconnect or switch back to USB when finished to avoid leaving ADB exposed.

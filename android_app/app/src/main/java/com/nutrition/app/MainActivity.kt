@@ -9,6 +9,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import android.content.Intent
@@ -16,8 +18,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.work.ExistingPeriodicWorkPolicy
 import com.nutrition.app.ui.foodentry.BarcodeScanActivity
 import com.nutrition.app.ui.foodentry.FoodEntryForm
+import com.nutrition.app.ui.foodentry.FoodEntryRoute
 import com.nutrition.app.ui.dailylog.DailyLogScreen
 import com.nutrition.app.ui.sportentry.SportEntryForm
+import com.nutrition.app.ui.sportentry.SportEntryRoute
 import com.nutrition.app.ui.theme.NutritionTheme
 import com.nutrition.app.ui.customfood.CustomFoodListScreen
 import com.nutrition.app.ui.customfood.CustomFoodEntryScreen
@@ -75,8 +79,35 @@ fun NutritionApp() {
                     navController.navigate("food_entry/${foodLog.foodName}/1/g/${Date().time}")
                 },
                 onSportLogClick = { sportLog ->
-                    navController.navigate("sport_entry/${sportLog.activityName}/${sportLog.durationMinutes}/0")
-                }
+                    navController.navigate("sport_entry_route?activityName=${sportLog.activityName}&duration=${sportLog.durationMinutes}&caloriesExpended=${sportLog.caloriesBurned}")
+                },
+                onNavigateToFoodEntry = { navController.navigate("food_entry_route") },
+                onNavigateToSportEntry = { navController.navigate("sport_entry_route") }
+            )
+        }
+        composable("food_entry_route") {
+            FoodEntryRoute(
+                onSave = { navController.popBackStack() },
+                onCancel = { navController.popBackStack() }
+            )
+        }
+        composable(
+            "sport_entry_route?activityName={activityName}&duration={duration}&caloriesExpended={caloriesExpended}",
+            arguments = listOf(
+                navArgument("activityName") { type = NavType.StringType; nullable = true },
+                navArgument("duration") { type = NavType.StringType; nullable = true },
+                navArgument("caloriesExpended") { type = NavType.FloatType; defaultValue = 0f }
+            )
+        ) { backStackEntry ->
+            val activityName = backStackEntry.arguments?.getString("activityName")
+            val duration = backStackEntry.arguments?.getString("duration")
+            val caloriesExpended = backStackEntry.arguments?.getFloat("caloriesExpended")
+            SportEntryRoute(
+                activityName = activityName,
+                duration = duration,
+                caloriesExpended = caloriesExpended,
+                onSave = { navController.popBackStack() },
+                onCancel = { navController.popBackStack() }
             )
         }
         composable("food_entry/{foodName}/{quantity}/{unit}/{loggedAt}") { backStackEntry ->
@@ -88,22 +119,21 @@ fun NutritionApp() {
             FoodEntryForm(
                 foodName = foodName,
                 quantity = quantity,
-                unit = unit,
                 loggedAt = loggedAt,
-                onSave = { _, _, _, _ -> navController.popBackStack() },
-                onCancel = { navController.popBackStack() },
+                onSave = { _, _, _ -> navController.popBackStack() },
+                onCancel = { navController.popBackStack() }
             )
         }
         composable("sport_entry/{activityName}/{duration}/{caloriesExpended}") { backStackEntry ->
             val activityName = backStackEntry.arguments?.getString("activityName") ?: ""
             val duration = backStackEntry.arguments?.getString("duration") ?: ""
-            val caloriesExpended = backStackEntry.arguments?.getString("caloriesExpended") ?: ""
+            val caloriesExpended = backStackEntry.arguments?.getString("caloriesExpended")?.toFloatOrNull() ?: 0f
 
-            SportEntryForm(
+            SportEntryRoute(
                 activityName = activityName,
                 duration = duration,
                 caloriesExpended = caloriesExpended,
-                onSave = { _, _, _ -> navController.popBackStack() },
+                onSave = { navController.popBackStack() },
                 onCancel = { navController.popBackStack() }
             )
         }

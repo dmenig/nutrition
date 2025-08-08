@@ -7,6 +7,7 @@ from app.routers import (
     sport_activities,
     food_logs,
     admin,
+    foods,
 )
 from app.schemas import (
     WeightPlotResponse,
@@ -32,6 +33,7 @@ app.include_router(auth.router, prefix="/api/v1", tags=["users"])
 app.include_router(custom_foods.router, prefix="", tags=["custom-foods"])
 app.include_router(sport_activities.router, prefix="", tags=["sports"])
 app.include_router(food_logs.router, prefix="", tags=["food-logs"])
+app.include_router(foods.router, prefix="", tags=["foods"])
 
 
 class PredictionService:
