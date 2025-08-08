@@ -3,6 +3,7 @@ package com.nutrition.app.di
 import android.content.Context
 import androidx.room.Room
 import com.nutrition.app.data.local.database.NutritionDatabase
+import com.nutrition.app.data.local.database.MIGRATION_1_2
 import com.nutrition.app.data.remote.NutritionApi
 import com.nutrition.app.data.remote.NutritionApiService
 import com.nutrition.app.data.repository.NutritionRepository
@@ -49,7 +50,9 @@ object AppModule {
             context.applicationContext,
             NutritionDatabase::class.java,
             "nutrition_database"
-        ).build()
+        )
+            .addMigrations(MIGRATION_1_2)
+            .build()
     }
 
     @Provides
