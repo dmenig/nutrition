@@ -49,6 +49,8 @@ class FoodEntryViewModel @Inject constructor(
                 localRepository.insertFoodLog(
                     FoodLog(
                         foodName = foodName,
+                        quantity = quantityInGrams.toDouble(),
+                        unit = "g",
                         calories = calories.toDouble(),
                         protein = protein.toDouble(),
                         carbs = carbs.toDouble(),

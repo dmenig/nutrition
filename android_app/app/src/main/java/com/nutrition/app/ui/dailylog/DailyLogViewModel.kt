@@ -73,6 +73,8 @@ class DailyLogViewModel @Inject constructor(
                                 repository.insertFoodLog(
                                     FoodLog(
                                         foodName = rl.foodName,
+                                        quantity = (if (needsRescale) rl.quantity * 100f else rl.quantity).toDouble(),
+                                        unit = rl.unit,
                                         calories = (rl.calories.toDouble() * factor),
                                         protein = (rl.protein.toDouble() * factor),
                                         carbs = (rl.carbs.toDouble() * factor),

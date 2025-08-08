@@ -97,7 +97,10 @@ fun DailyLogScreen(
                         ) {
                             Column(modifier = Modifier.padding(16.dp)) {
                                 Text(text = log.foodName, style = MaterialTheme.typography.bodyLarge)
-                                Text(text = "${"%.0f".format(log.calories)} kcal", style = MaterialTheme.typography.bodySmall)
+                                Text(
+                                    text = "${"%.0f".format(log.calories)} kcal • ${"%.0f".format(log.quantity)} ${log.unit}",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
                             }
                         }
                     }
