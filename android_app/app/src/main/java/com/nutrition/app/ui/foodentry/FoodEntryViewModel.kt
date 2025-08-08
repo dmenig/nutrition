@@ -33,10 +33,16 @@ class FoodEntryViewModel @Inject constructor(
             val food = nutritionRepository.searchFoods(foodName).getOrNull()?.firstOrNull()
             if (food != null) {
                 val parsedQuantity = quantity.toFloatOrNull() ?: 0f
-                val calories = food.nutriments.calories * parsedQuantity
-                val protein = food.nutriments.protein * parsedQuantity
-                val carbs = food.nutriments.carbohydrates * parsedQuantity
-                val fat = food.nutriments.fat * parsedQuantity
+                // Heuristic: if quantity looks like a small number (< 10), interpret it as
+                // number of 100g servings to match common user input like "1".
+                val quantityInGrams = if (parsedQuantity in 0f..10f) parsedQuantity * 100f else parsedQuantity
+                // Nutriments from backend are per 100g. Quantity is in grams.
+                // Scale per-100g values by (grams / 100) to get actual nutrient amounts.
+                val scale = quantityInGrams / 100f
+                val calories = food.nutriments.calories * scale
+                val protein = food.nutriments.protein * scale
+                val carbs = food.nutriments.carbohydrates * scale
+                val fat = food.nutriments.fat * scale
 
                 // Persist locally so Daily Log updates immediately
                 val localEpochMillis = loggedAt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()

@@ -63,7 +63,7 @@ fun FoodEntryForm(
             OutlinedTextField(
                 value = currentQuantity,
                 onValueChange = { currentQuantity = it },
-                label = { Text("Quantity") },
+                label = { Text("Quantity (g)") },
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(modifier = Modifier.height(8.dp))

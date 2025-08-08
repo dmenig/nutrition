@@ -68,29 +68,7 @@ class DailyLogViewModel @Inject constructor(
             }
         }
 
-        // Remote pull for this day (dummy public endpoint) and upsert locally
-        viewModelScope.launch {
-            val localDate = date.toInstant().atZone(ZoneId.systemDefault()).toLocalDate()
-            val remoteLogs = try {
-                remoteRepository.fetchFoodLogsForDate(localDate).getOrNull()
-            } catch (e: Exception) { null }
-            if (!remoteLogs.isNullOrEmpty()) {
-                remoteLogs.forEach { rl: FoodLogResponse ->
-                    val epochMillis = toEpochMillis(rl.loggedAt)
-                    repository.insertFoodLog(
-                        FoodLog(
-                            foodName = rl.foodName,
-                            calories = rl.calories.toDouble(),
-                            protein = rl.protein.toDouble(),
-                            carbs = rl.carbs.toDouble(),
-                            fat = rl.fat.toDouble(),
-                            date = epochMillis,
-                            synced = true
-                        )
-                    )
-                }
-            }
-        }
+        // Remote public pull disabled to avoid polluting local summary with stale sample data
     }
 
     private fun toEpochMillis(dt: LocalDateTime): Long =

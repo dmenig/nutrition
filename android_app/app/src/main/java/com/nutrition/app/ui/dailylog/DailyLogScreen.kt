@@ -71,9 +71,9 @@ fun DailyLogScreen(
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text("Daily Summary:")
                         Text("Calories: ${dailySummary?.totalCalories ?: "N/A"}")
-                        Text("Protein: ${dailySummary?.totalProtein ?: "N/A"}")
-                        Text("Carbs: ${dailySummary?.totalCarbs ?: "N/A"}")
-                        Text("Fat: ${dailySummary?.totalFat ?: "N/A"}")
+                        Text("Protein: ${dailySummary?.totalProtein ?: "N/A"} g")
+                        Text("Carbs: ${dailySummary?.totalCarbs ?: "N/A"} g")
+                        Text("Fat: ${dailySummary?.totalFat ?: "N/A"} g")
                     }
                 }
 
