@@ -97,10 +97,13 @@ fun DailyLogScreen(
                         ) {
                             Column(modifier = Modifier.padding(16.dp)) {
                                 Text(text = log.foodName, style = MaterialTheme.typography.bodyLarge)
-                                Text(
-                                    text = "${"%.0f".format(log.calories)} kcal • ${"%.0f".format(log.quantity)} ${log.unit}",
-                                    style = MaterialTheme.typography.bodySmall
-                                )
+                                val qty = log.quantity
+                                val details = if (qty > 0.0) {
+                                    "${"%.0f".format(log.calories)} kcal • ${"%.0f".format(qty)} ${log.unit}"
+                                } else {
+                                    "${"%.0f".format(log.calories)} kcal"
+                                }
+                                Text(text = details, style = MaterialTheme.typography.bodySmall)
                             }
                         }
                     }
