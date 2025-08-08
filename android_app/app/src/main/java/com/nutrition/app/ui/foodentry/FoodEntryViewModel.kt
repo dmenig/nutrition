@@ -4,16 +4,20 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nutrition.app.data.NutritionRepository
+import com.nutrition.app.data.local.entities.FoodLog
+import com.nutrition.app.data.repository.NutritionRepository as LocalNutritionRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import java.time.LocalDateTime
+import java.time.ZoneId
 import javax.inject.Inject
 
 @HiltViewModel
 class FoodEntryViewModel @Inject constructor(
     private val nutritionRepository: NutritionRepository,
+    private val localRepository: LocalNutritionRepository,
     private val savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -34,6 +38,20 @@ class FoodEntryViewModel @Inject constructor(
                 val carbs = food.nutriments.carbohydrates * parsedQuantity
                 val fat = food.nutriments.fat * parsedQuantity
 
+                // Persist locally so Daily Log updates immediately
+                val localEpochMillis = loggedAt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+                localRepository.insertFoodLog(
+                    FoodLog(
+                        foodName = foodName,
+                        calories = calories.toDouble(),
+                        protein = protein.toDouble(),
+                        carbs = carbs.toDouble(),
+                        fat = fat.toDouble(),
+                        date = localEpochMillis
+                    )
+                )
+
+                // Attempt remote creation
                 val result = nutritionRepository.insertFoodLog(
                     foodName, parsedQuantity, "g", loggedAt, calories, protein, carbs, fat
                 )

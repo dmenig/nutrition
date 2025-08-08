@@ -4,6 +4,8 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nutrition.app.data.NutritionRepository
+import com.nutrition.app.data.local.entities.SportActivity
+import com.nutrition.app.data.repository.NutritionRepository as LocalNutritionRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -11,11 +13,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import java.time.LocalDateTime
+import java.time.ZoneId
 import javax.inject.Inject
 
 @HiltViewModel
 class SportEntryViewModel @Inject constructor(
     private val nutritionRepository: NutritionRepository,
+    private val localRepository: LocalNutritionRepository,
     private val savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -46,6 +50,18 @@ class SportEntryViewModel @Inject constructor(
         distanceM: Float?
     ) {
         viewModelScope.launch {
+            // Persist locally so Daily Log updates immediately
+            val localEpochMillis = loggedAt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+            localRepository.insertSportActivity(
+                SportActivity(
+                    activityName = activityName,
+                    durationMinutes = durationMinutes,
+                    caloriesBurned = caloriesExpended.toDouble(),
+                    date = localEpochMillis
+                )
+            )
+
+            // Attempt remote creation
             nutritionRepository.insertSportActivity(
                 activityName, loggedAt, durationMinutes, caloriesExpended, carriedWeightKg, distanceM
             )
