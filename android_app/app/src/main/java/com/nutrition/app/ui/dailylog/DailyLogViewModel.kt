@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nutrition.app.data.local.dao.DailyNutritionSummary
 import com.nutrition.app.data.remote.model.FoodLogResponse
+import com.nutrition.app.data.remote.model.SportActivityResponse
 import com.nutrition.app.data.local.entities.FoodLog
 import com.nutrition.app.data.local.entities.SportActivity
 import com.nutrition.app.data.repository.NutritionRepository
@@ -91,6 +92,27 @@ class DailyLogViewModel @Inject constructor(
         viewModelScope.launch {
             repository.getActivitiesForDay(startOfDay, endOfDay).collect { sportActivities ->
                 _sportLogs.value = sportActivities
+                if (sportActivities.isEmpty()) {
+                    // Fallback: fetch remote sports for the date and insert locally
+                    try {
+                        val localDate = date.toInstant().atZone(ZoneId.systemDefault()).toLocalDate()
+                        val remoteSports = remoteRepository.fetchSportActivitiesForDate(localDate).getOrNull()
+                        if (!remoteSports.isNullOrEmpty()) {
+                            remoteSports.forEach { rs: SportActivityResponse ->
+                                val epochMillis = toEpochMillis(rs.loggedAt)
+                                repository.insertSportActivity(
+                                    com.nutrition.app.data.local.entities.SportActivity(
+                                        activityName = rs.activityName,
+                                        durationMinutes = rs.durationMinutes,
+                                        caloriesBurned = rs.caloriesExpended.toDouble(),
+                                        date = epochMillis,
+                                        synced = true
+                                    )
+                                )
+                            }
+                        }
+                    } catch (_: Exception) { /* ignore demo fetch errors */ }
+                }
             }
         }
 

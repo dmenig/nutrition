@@ -109,3 +109,31 @@ def delete_sport_activity(
 @router.get("/api/v1/sports/names", response_model=List[str])
 def get_sport_names():
     return list(MET_VALUES.keys())
+
+
+@router.get("/api/v1/sports/public", response_model=List[schemas.SportActivityOut])
+def get_sport_activities_by_date_public(
+    date: str,
+    db: Session = Depends(get_db),
+):
+    try:
+        parsed_date = datetime.strptime(date, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid date format. Please use YYYY-MM-DD.",
+        )
+
+    dummy_user = db.query(User).filter(User.email == "dummy@example.com").first()
+    if not dummy_user:
+        return []
+
+    sport_activities = (
+        db.query(SportActivity)
+        .filter(
+            SportActivity.user_id == dummy_user.id,
+            func.date(SportActivity.logged_at) == parsed_date,
+        )
+        .all()
+    )
+    return sport_activities
