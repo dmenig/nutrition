@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -22,6 +23,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
@@ -45,6 +49,9 @@ fun DailyLogScreen(
     val dailySummary by viewModel.dailySummary.collectAsState()
     val foodLogs by viewModel.foodLogs.collectAsState()
     val sportLogs by viewModel.sportLogs.collectAsState()
+
+    var isFoodSectionExpanded by rememberSaveable { mutableStateOf(false) }
+    var isSportSectionExpanded by rememberSaveable { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -79,65 +86,60 @@ fun DailyLogScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Paginated List of Food and Sport Logs
+                // Foldable sections for Food and Sport Logs
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(vertical = 8.dp)
                 ) {
                     item {
-                        Text("Food Logs:", style = MaterialTheme.typography.titleMedium)
-                        Spacer(modifier = Modifier.height(8.dp))
+                        SectionHeader(
+                            title = "Food Logs",
+                            isExpanded = isFoodSectionExpanded,
+                            onToggle = { isFoodSectionExpanded = !isFoodSectionExpanded }
+                        )
                     }
-                    items(foodLogs) { log ->
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp)
-                                .clickable { onFoodLogClick(log) }
-                        ) {
-                            Column(modifier = Modifier.padding(16.dp)) {
-                                Text(text = log.foodName, style = MaterialTheme.typography.bodyLarge)
-                                val qtyInGrams = if (log.unit.lowercase() == "100g") log.quantity * 100.0 else log.quantity
-                                val unitLabel = "g"
-                                val details = if (qtyInGrams > 0.0) {
-                                    "${"%.0f".format(log.calories)} kcal • ${"%.0f".format(qtyInGrams)} $unitLabel"
-                                } else {
-                                    "${"%.0f".format(log.calories)} kcal"
+                    if (isFoodSectionExpanded) {
+                        items(foodLogs) { log ->
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                                    .clickable { onFoodLogClick(log) }
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Text(text = log.foodName, style = MaterialTheme.typography.bodyLarge)
+                                    val qtyInGrams = if (log.unit.lowercase() == "100g") log.quantity * 100.0 else log.quantity
+                                    val unitLabel = "g"
+                                    val details = if (qtyInGrams > 0.0) {
+                                        "${"%.0f".format(log.calories)} kcal • ${"%.0f".format(qtyInGrams)} $unitLabel"
+                                    } else {
+                                        "${"%.0f".format(log.calories)} kcal"
+                                    }
+                                    Text(text = details, style = MaterialTheme.typography.bodySmall)
                                 }
-                                Text(text = details, style = MaterialTheme.typography.bodySmall)
                             }
                         }
                     }
 
                     item {
                         Spacer(modifier = Modifier.height(16.dp))
-                        Text("Sport Logs:", style = MaterialTheme.typography.titleMedium)
-                        Spacer(modifier = Modifier.height(8.dp))
+                        SectionHeader(
+                            title = "Sport Logs",
+                            isExpanded = isSportSectionExpanded,
+                            onToggle = { isSportSectionExpanded = !isSportSectionExpanded }
+                        )
                     }
-                    items(sportLogs) { log ->
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp)
-                                .clickable { onSportLogClick(log) }
-                        ) {
-                            Column(modifier = Modifier.padding(16.dp)) {
-                                Text(text = log.activityName, style = MaterialTheme.typography.bodyLarge)
-                                Text(text = "${log.durationMinutes} min", style = MaterialTheme.typography.bodySmall)
-                            }
-                            Column(
+                    if (isSportSectionExpanded) {
+                        items(sportLogs) { log ->
+                            Card(
                                 modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(16.dp),
-                                verticalArrangement = Arrangement.Bottom,
-                                horizontalAlignment = Alignment.End
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                                    .clickable { onSportLogClick(log) }
                             ) {
-                                FloatingActionButton(onClick = onNavigateToFoodEntry) {
-                                    Text("Add Food")
-                                }
-                                Spacer(modifier = Modifier.height(16.dp))
-                                FloatingActionButton(onClick = onNavigateToSportEntry) {
-                                    Text("Add Sport")
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Text(text = log.activityName, style = MaterialTheme.typography.bodyLarge)
+                                    Text(text = "${log.durationMinutes} min", style = MaterialTheme.typography.bodySmall)
                                 }
                             }
                         }
@@ -166,6 +168,26 @@ fun DailyLogScreen(
 // Extension function for Date formatting (will be replaced by a proper formatter)
 fun Date.toFormattedString(): String {
     return this.toLocaleString() // Simple formatting for now
+}
+
+@Composable
+private fun SectionHeader(
+    title: String,
+    isExpanded: Boolean,
+    onToggle: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onToggle() }
+            .padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(title + ":", style = MaterialTheme.typography.titleMedium)
+        val indicator = if (isExpanded) "▾" else "▸"
+        Text(indicator, style = MaterialTheme.typography.titleMedium)
+    }
 }
 
 @Preview(showBackground = true)
