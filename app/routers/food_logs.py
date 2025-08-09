@@ -88,22 +88,19 @@ def get_food_logs_for_date_public(
     date: date = Query(..., description="Date in YYYY-MM-DD format"),
     db: Session = Depends(get_db),
 ):
-    dummy_user = db.query(User).filter(User.email == "dummy@example.com").first()
-    if not dummy_user:
-        return []
     day_start = datetime(date.year, date.month, date.day, tzinfo=timezone.utc)
     day_end = day_start + timedelta(days=1)
 
-    food_logs = (
-        db.query(FoodLog)
-        .filter(
-            FoodLog.user_id == dummy_user.id,
-            FoodLog.logged_at >= day_start,
-            FoodLog.logged_at < day_end,
-        )
-        .order_by(FoodLog.logged_at.asc())
-        .all()
+    dummy_user = db.query(User).filter(User.email == "dummy@example.com").first()
+
+    query = db.query(FoodLog).filter(
+        FoodLog.logged_at >= day_start,
+        FoodLog.logged_at < day_end,
     )
+    if dummy_user:
+        query = query.filter(FoodLog.user_id == dummy_user.id)
+
+    food_logs = query.order_by(FoodLog.logged_at.asc()).all()
     return food_logs
 
 
@@ -112,27 +109,25 @@ def get_daily_food_log_summary_public(
     date: date = Query(..., description="Date in YYYY-MM-DD format"),
     db: Session = Depends(get_db),
 ):
-    dummy_user = db.query(User).filter(User.email == "dummy@example.com").first()
-    if not dummy_user:
-        return DailyFoodLogSummary(calories=0.0, protein_g=0.0, carbs_g=0.0, fat_g=0.0)
-
     day_start = datetime(date.year, date.month, date.day, tzinfo=timezone.utc)
     day_end = day_start + timedelta(days=1)
 
-    summary = (
-        db.query(
-            func.coalesce(func.sum(FoodLog.calories), 0).label("calories"),
-            func.coalesce(func.sum(FoodLog.protein), 0).label("protein_g"),
-            func.coalesce(func.sum(FoodLog.carbs), 0).label("carbs_g"),
-            func.coalesce(func.sum(FoodLog.fat), 0).label("fat_g"),
-        )
-        .filter(
-            FoodLog.user_id == dummy_user.id,
-            FoodLog.logged_at >= day_start,
-            FoodLog.logged_at < day_end,
-        )
-        .first()
+    dummy_user = db.query(User).filter(User.email == "dummy@example.com").first()
+
+    base_query = db.query(
+        func.coalesce(func.sum(FoodLog.calories), 0).label("calories"),
+        func.coalesce(func.sum(FoodLog.protein), 0).label("protein_g"),
+        func.coalesce(func.sum(FoodLog.carbs), 0).label("carbs_g"),
+        func.coalesce(func.sum(FoodLog.fat), 0).label("fat_g"),
+    ).filter(
+        FoodLog.logged_at >= day_start,
+        FoodLog.logged_at < day_end,
     )
+
+    if dummy_user:
+        base_query = base_query.filter(FoodLog.user_id == dummy_user.id)
+
+    summary = base_query.first()
 
     if not summary:
         return DailyFoodLogSummary(calories=0.0, protein_g=0.0, carbs_g=0.0, fat_g=0.0)

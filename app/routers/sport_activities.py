@@ -130,20 +130,16 @@ def get_sport_activities_by_date_public(
         )
 
     dummy_user = db.query(User).filter(User.email == "dummy@example.com").first()
-    if not dummy_user:
-        return []
 
     day_start = datetime(parsed_date.year, parsed_date.month, parsed_date.day, tzinfo=timezone.utc)
     day_end = day_start + timedelta(days=1)
 
-    sport_activities = (
-        db.query(SportActivity)
-        .filter(
-            SportActivity.user_id == dummy_user.id,
-            SportActivity.logged_at >= day_start,
-            SportActivity.logged_at < day_end,
-        )
-        .order_by(SportActivity.logged_at.asc())
-        .all()
+    query = db.query(SportActivity).filter(
+        SportActivity.logged_at >= day_start,
+        SportActivity.logged_at < day_end,
     )
+    if dummy_user:
+        query = query.filter(SportActivity.user_id == dummy_user.id)
+
+    sport_activities = query.order_by(SportActivity.logged_at.asc()).all()
     return sport_activities
