@@ -88,7 +88,7 @@ class SportActivityOut(SportActivityBase):
 class FoodLogBase(BaseModel):
     food_name: str
     quantity: float
-    unit: Optional[str] = "100g"
+    unit: Optional[str] = "g"
     logged_at: datetime
     calories: float
     protein: float
