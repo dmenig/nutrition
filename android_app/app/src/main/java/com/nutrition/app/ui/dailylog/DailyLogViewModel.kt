@@ -67,18 +67,16 @@ class DailyLogViewModel @Inject constructor(
                         if (!remoteLogs.isNullOrEmpty()) {
                             remoteLogs.forEach { rl: FoodLogResponse ->
                                 val epochMillis = toEpochMillis(rl.loggedAt)
-                                // Fix-up legacy demo data where quantity was interpreted as grams instead of 100g servings
-                                val needsRescale = rl.unit.lowercase() == "g" && rl.quantity <= 10f
-                                val factor = if (needsRescale) 100.0 else 1.0
+                                // Trust server values as-is; no rescaling heuristics.
                                 repository.insertFoodLog(
                                     FoodLog(
                                         foodName = rl.foodName,
-                                        quantity = (if (needsRescale) rl.quantity * 100f else rl.quantity).toDouble(),
+                                        quantity = rl.quantity.toDouble(),
                                         unit = rl.unit,
-                                        calories = (rl.calories.toDouble() * factor),
-                                        protein = (rl.protein.toDouble() * factor),
-                                        carbs = (rl.carbs.toDouble() * factor),
-                                        fat = (rl.fat.toDouble() * factor),
+                                        calories = rl.calories.toDouble(),
+                                        protein = rl.protein.toDouble(),
+                                        carbs = rl.carbs.toDouble(),
+                                        fat = rl.fat.toDouble(),
                                         date = epochMillis,
                                         synced = true
                                     )

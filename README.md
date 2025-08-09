@@ -83,25 +83,33 @@ This repo includes scripts and data to fill the production database with food de
   python -m pip install -r requirements.txt
   ```
 
-- Configure DB connection (Neon):
-  - Create `.env.local` in repo root with:
-    ```env
-    DATABASE_URL=postgresql://<user>:<pass>@<neon-host>/<db>?sslmode=require
-    ```
-  - Alternatively: `export DATABASE_URL=...` in your shell session.
+- DB configuration source of truth:
+  - The default `DATABASE_URL` is defined in code in `app/core/config.py` (`Settings.DATABASE_URL`).
+  - Settings are loaded via `pydantic-settings`, which reads `.env` and `.env.local` automatically. Any value set in the environment or these files will override the in-code default.
+  - For docker-compose, `.env` already contains `DATABASE_URL=postgresql://user:password@db:5432/nutrition_db` so containers can talk to the Postgres service at host `db`.
 
-- Populate tables:
+- Populate tables (using the in-code Neon default or your override):
   ```bash
   . .venv/bin/activate
-  # Load .env and .env.local automatically via pydantic-settings
+  # .env/.env.local overrides are picked up automatically
   PYTHONPATH=. python app/db/populate_db.py
   ```
   Notes:
   - The script first (re)populates `foods` from `data/variables.csv`.
   - It then parses each `Nourriture` formula in `data/processed_journal.csv` and inserts rows in `food_logs`.
-  - Formula parsing supports nested groups and division (e.g. `a*(b+c)/3`). Numeric factors are correctly distributed. Coefficients are interpreted as counts of 100g servings (e.g., `15*schweppes_zero` → 1500g).
+  - Formula parsing supports nested groups and division (e.g. `a*(b+c)/3`). Numeric factors are correctly distributed. All numeric coefficients represent counts of 100g servings (e.g., `15*schweppes_zero` → 1500 g). The Android app treats entered quantities strictly as counts of 100g servings (input “1.5” means 150 g).
 
-- Verify population:
+- Alternative: populate/verify against the local docker DB (inside the container):
+  ```bash
+  # Start Postgres
+  docker-compose up -d db
+  # Run populate against the compose DB (uses .env DATABASE_URL with host "db")
+  docker-compose run --rm -e PYTHONPATH=/app backend python app/db/populate_db.py
+  # Verify counts inside the container
+  docker-compose run --rm -e PYTHONPATH=/app backend python app/verify_db.py
+  ```
+
+- Verify population (host, using Neon default or your override):
   ```bash
   PYTHONPATH=. python app/verify_db.py
   # Or per-day comparison (example date):
@@ -109,8 +117,8 @@ This repo includes scripts and data to fill the production database with food de
   ```
 
 - Troubleshooting:
-  - If you see `Could not parse SQLAlchemy URL`: ensure `DATABASE_URL` is set.
-  - If you see `could not translate host name "db"`: your `.env` likely points to a docker-compose host; use your Neon URL instead.
+  - If you see `Could not parse SQLAlchemy URL`: ensure an effective `DATABASE_URL` is available (in-code default, env var, or `.env(.local)`).
+  - If you see `could not translate host name "db"`: you're running from the host while pointing to the compose DB. Either run the command inside the container (see alternative above) or override `DATABASE_URL` to a reachable host (e.g., Neon URL).
   - If imports fail, add the project root to `PYTHONPATH`: `PYTHONPATH=. python app/db/populate_db.py`.
 
 ### Android Emulator (AVD) setup

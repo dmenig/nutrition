@@ -67,11 +67,11 @@ fun FoodEntryForm(
                     val sanitized = input.replace("[^0-9.]".toRegex(), "")
                     currentQuantity = sanitized
                 },
-                label = { Text("Quantity (g)") },
+                label = { Text("Quantity (x 100g servings)") },
                 isError = currentQuantity.isBlank() || (currentQuantity.toFloatOrNull() ?: 0f) <= 0f,
                 supportingText = {
                     if (currentQuantity.isBlank() || (currentQuantity.toFloatOrNull() ?: 0f) <= 0f) {
-                        Text("Enter a quantity > 0")
+                        Text("Enter servings > 0 (each serving = 100g)")
                     }
                 },
                 modifier = Modifier.fillMaxWidth()

@@ -37,9 +37,9 @@ class FoodEntryViewModel @Inject constructor(
                     _uiEvent.send(FoodEntryUiEvent.ShowError("Enter a quantity greater than 0 g"))
                     return@launch
                 }
-                // Heuristic aligned with backend/demo population:
-                // If quantity <= 10, interpret as number of 100g servings; else treat as grams.
-                val quantityInGrams = if (parsedQuantity <= 10f) parsedQuantity * 100f else parsedQuantity
+                // Quantity is interpreted strictly as number of 100g servings.
+                // Convert servings to grams for storage/transmission.
+                val quantityInGrams = parsedQuantity * 100f
                 // Nutriments from backend are per 100g. Quantity is in grams.
                 // Scale per-100g values by (grams / 100) to get actual nutrient amounts.
                 val scale = quantityInGrams / 100f
