@@ -28,6 +28,7 @@ import com.nutrition.app.ui.customfood.CustomFoodEntryScreen
 import java.util.Date
 
 import androidx.work.Constraints
+import android.net.Uri
 import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
@@ -76,7 +77,9 @@ fun NutritionApp() {
         composable("daily_log") {
             DailyLogScreen(
                 onFoodLogClick = { foodLog ->
-                    navController.navigate("food_entry/${foodLog.foodName}/1/g/${Date().time}")
+                    val encodedName = Uri.encode(foodLog.foodName)
+                    val encodedUnit = Uri.encode(foodLog.unit)
+                    navController.navigate("food_entry/$encodedName/${foodLog.quantity}/$encodedUnit/${foodLog.date}")
                 },
                 onSportLogClick = { sportLog ->
                     navController.navigate("sport_entry_route?activityName=${sportLog.activityName}&duration=${sportLog.durationMinutes}")

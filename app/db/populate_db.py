@@ -5,9 +5,9 @@ import re
 import ast
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine, text
+from utils import SafeFormulaEvaluator, normalize_food_names
 from app.db.models import Base, Food, FoodLog, User
 from app.core.config import settings
-from utils import SafeFormulaEvaluator, normalize_food_names
 
 engine = create_engine(settings.DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -81,35 +81,43 @@ def _extract_food_items(node, food_items, current_quantity=1.0):
     """
     Recursively extracts food items and their quantities from an AST node.
     """
+    # Helper to evaluate purely numeric sub-expressions (no variable names)
+    def _eval_numeric(subnode):
+        try:
+            evaluator = SafeFormulaEvaluator()
+            return float(evaluator.visit(subnode))
+        except Exception:
+            return None
+
     if isinstance(node, ast.BinOp):
         if isinstance(node.op, (ast.Mult, ast.Div)):
-            # Handle multiplication or division (quantity * food_name or quantity / food_name)
-            if isinstance(node.left, (ast.Constant, ast.Num)) and isinstance(
-                node.right, ast.Name
-            ):
-                quantity = (
-                    node.left.value
-                    if isinstance(node.left, ast.Constant)
-                    else node.left.n
-                )
-                if isinstance(node.op, ast.Div):
-                    quantity = 1.0 / quantity
-                food_items.append((quantity * current_quantity, node.right.id))
-            elif isinstance(node.left, ast.Name) and isinstance(
-                node.right, (ast.Constant, ast.Num)
-            ):
-                quantity = (
-                    node.right.value
-                    if isinstance(node.right, ast.Constant)
-                    else node.right.n
-                )
-                if isinstance(node.op, ast.Div):
-                    quantity = 1.0 / quantity
-                food_items.append((quantity * current_quantity, node.left.id))
-            else:
-                # Recursively process both sides
+            # Try to evaluate either side if it's a purely numeric expression
+            left_numeric = _eval_numeric(node.left)
+            right_numeric = _eval_numeric(node.right)
+
+            if isinstance(node.op, ast.Mult):
+                if left_numeric is not None:
+                    _extract_food_items(node.right, food_items, current_quantity * left_numeric)
+                    return
+                if right_numeric is not None:
+                    _extract_food_items(node.left, food_items, current_quantity * right_numeric)
+                    return
+                # Fallback: propagate through both sides (rare ambiguous case)
                 _extract_food_items(node.left, food_items, current_quantity)
                 _extract_food_items(node.right, food_items, current_quantity)
+                return
+
+            # Division
+            if right_numeric is not None:
+                _extract_food_items(node.left, food_items, current_quantity / right_numeric)
+                return
+            if left_numeric is not None and isinstance(node.right, ast.Name):
+                # Case like: numeric / name → interpret as (numeric) distributed to name denominator
+                # Not expected in our data; skip to avoid incorrect attribution.
+                return
+            # Fallback
+            _extract_food_items(node.left, food_items, current_quantity)
+            _extract_food_items(node.right, food_items, current_quantity)
         elif isinstance(node.op, ast.Add):
             # Handle addition (food_item + food_item)
             _extract_food_items(node.left, food_items, current_quantity)
@@ -241,11 +249,10 @@ def populate_food_log_table():
                     },
                 )
 
-                # Interpret quantities:
-                # - If quantity is a small number (<= 10), treat it as "number of 100g servings"
-                #   to avoid defaulting bare items (e.g., "pain") to 1 gram.
-                # - Otherwise assume it is already in grams.
-                quantity_in_grams = quantity * 100 if quantity <= 10 else quantity
+                # Interpret all parsed coefficients as counts of 100g servings.
+                # This ensures expressions like "15*schweppes_zero" map to 1500g,
+                # and decimals like "1,358*(...)/4" keep full precision per item.
+                quantity_in_grams = float(quantity) * 100.0
 
                 # The nutritional values in the CSV are per 100g.
                 # Scale by (grams / 100) to compute actual amounts.
