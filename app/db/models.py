@@ -38,6 +38,8 @@ class SportActivity(Base):
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     activity_name = Column(String, nullable=False)
     duration_minutes = Column(Integer, nullable=False)
+    carried_weight_kg = Column(Float)
+    distance_m = Column(Float)
     calories_expended = Column(Float)
     logged_at = Column(
         TIMESTAMP(timezone=True), default=datetime.utcnow, nullable=False

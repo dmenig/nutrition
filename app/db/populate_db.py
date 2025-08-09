@@ -295,7 +295,7 @@ def verify_population():
         print(f"Rows in food_logs: {food_log_count}")
         print(f"Rows in sport_activities: {sport_count}")
 
-def _extract_sport_calls_with_calories(expr_eval: str) -> list[tuple[str, int, float]]:
+def _extract_sport_calls_with_calories(expr_eval: str) -> list[tuple[str, int, float, float | None, float | None]]:
     """
     Finds every whitelisted sport function call in the expression and returns a list of
     tuples: (activity_name, duration_minutes, calories_for_that_call).
@@ -322,7 +322,7 @@ def _extract_sport_calls_with_calories(expr_eval: str) -> list[tuple[str, int, f
         return []
 
     evaluator = SafeSportFormulaEvaluator(SPORT_FUNCTIONS)
-    calls: list[tuple[str, int, float]] = []
+    calls: list[tuple[str, int, float, float | None, float | None]] = []
 
     def is_pure_numeric(node: ast.AST) -> bool:
         try:
@@ -343,6 +343,8 @@ def _extract_sport_calls_with_calories(expr_eval: str) -> list[tuple[str, int, f
             func_upper = node.func.id.upper()
             activity_name = humanize(func_upper)
             duration_minutes = 0
+            distance_m_val: float | None = None
+            add_weight_val: float | None = None
             # Prefer keyword argument
             for kw in getattr(node, "keywords", []) or []:
                 if kw.arg == "duration_minutes":
@@ -359,12 +361,29 @@ def _extract_sport_calls_with_calories(expr_eval: str) -> list[tuple[str, int, f
                     duration_minutes = int(round(float(duration_val)))
                 except Exception:
                     duration_minutes = 0
+            # Capture optional positional args if present
+            try:
+                if len(getattr(node, "args", [])) >= 3:
+                    distance_m_val = float(evaluator.visit(node.args[2]))
+                if len(getattr(node, "args", [])) >= 4:
+                    add_weight_val = float(evaluator.visit(node.args[3]))
+            except Exception:
+                pass
+            # Capture keyword overrides if present
+            for kw in getattr(node, "keywords", []) or []:
+                try:
+                    if kw.arg == "distance_meters":
+                        distance_m_val = float(evaluator.visit(kw.value))
+                    if kw.arg == "additional_weight_kg":
+                        add_weight_val = float(evaluator.visit(kw.value))
+                except Exception:
+                    pass
             # Base calories for this call
             try:
                 base_cal = float(evaluator.visit(node))
             except Exception:
                 base_cal = 0.0
-            calls.append((activity_name, duration_minutes, base_cal * factor))
+            calls.append((activity_name, duration_minutes, base_cal * factor, add_weight_val, distance_m_val))
             return
 
         # Binary operations can scale calls
@@ -476,27 +495,13 @@ def populate_sport_activities_table():
             # Split into individual calls so DB rows match the journal entries
             calls = _extract_sport_calls_with_calories(expr_eval)
 
-            if calls:
-                for activity_name, duration_minutes, calories_expended in calls:
-                    sa = SportActivity(
-                        user_id=dummy_user.id,
-                        activity_name=activity_name,
-                        duration_minutes=duration_minutes,
-                        calories_expended=calories_expended,
-                        logged_at=date,
-                    )
-                    db.add(sa)
-                    inserted += 1
-            else:
-                # Fallback: evaluate whole expression and attach unknown metadata
-                try:
-                    calories_expended = float(evaluate_sport_formula(expr_eval))
-                except Exception:
-                    calories_expended = 0.0
+            for activity_name, duration_minutes, calories_expended, add_weight, distance_m in calls:
                 sa = SportActivity(
                     user_id=dummy_user.id,
-                    activity_name="Unknown",
-                    duration_minutes=0,
+                    activity_name=activity_name,
+                    duration_minutes=duration_minutes,
+                    carried_weight_kg=add_weight,
+                    distance_m=distance_m,
                     calories_expended=calories_expended,
                     logged_at=date,
                 )

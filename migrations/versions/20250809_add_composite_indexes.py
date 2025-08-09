@@ -18,6 +18,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # New columns for sport details
+    op.add_column("sport_activities", sa.Column("carried_weight_kg", sa.Float(), nullable=True))
+    op.add_column("sport_activities", sa.Column("distance_m", sa.Float(), nullable=True))
     op.create_index(
         "ix_food_logs_user_id_logged_at",
         "food_logs",
@@ -33,6 +36,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.drop_column("sport_activities", "distance_m")
+    op.drop_column("sport_activities", "carried_weight_kg")
     op.drop_index("ix_sport_activities_user_id_logged_at", table_name="sport_activities")
     op.drop_index("ix_food_logs_user_id_logged_at", table_name="food_logs")
 

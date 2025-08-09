@@ -80,6 +80,7 @@ class SportActivityUpdate(SportActivityBase):
 class SportActivityOut(SportActivityBase):
     id: UUID
     user_id: UUID
+    calories_expended: float | None = None
 
     class Config:
         from_attributes = True
