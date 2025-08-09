@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from uuid import UUID
 from sqlalchemy import func
 
@@ -70,13 +70,18 @@ def get_sport_activities_by_date(
             detail="Invalid date format. Please use YYYY-MM-DD.",
         )
 
-    # Compare by date portion to include any time within the day
+    # Use range scan to allow index usage
+    day_start = datetime(parsed_date.year, parsed_date.month, parsed_date.day, tzinfo=timezone.utc)
+    day_end = day_start + timedelta(days=1)
+
     sport_activities = (
         db.query(SportActivity)
         .filter(
             SportActivity.user_id == current_user.id,
-            func.date(SportActivity.logged_at) == parsed_date,
+            SportActivity.logged_at >= day_start,
+            SportActivity.logged_at < day_end,
         )
+        .order_by(SportActivity.logged_at.asc())
         .all()
     )
     return sport_activities
@@ -128,12 +133,17 @@ def get_sport_activities_by_date_public(
     if not dummy_user:
         return []
 
+    day_start = datetime(parsed_date.year, parsed_date.month, parsed_date.day, tzinfo=timezone.utc)
+    day_end = day_start + timedelta(days=1)
+
     sport_activities = (
         db.query(SportActivity)
         .filter(
             SportActivity.user_id == dummy_user.id,
-            func.date(SportActivity.logged_at) == parsed_date,
+            SportActivity.logged_at >= day_start,
+            SportActivity.logged_at < day_end,
         )
+        .order_by(SportActivity.logged_at.asc())
         .all()
     )
     return sport_activities

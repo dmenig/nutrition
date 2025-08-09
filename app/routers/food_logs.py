@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List
-from datetime import datetime, date
+from datetime import datetime, date, timezone, timedelta
 from sqlalchemy import func  # Import func for aggregation
 
 from app.db.models import FoodLog, User
@@ -23,17 +23,21 @@ def get_daily_food_log_summary(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user),
 ):
+    day_start = datetime(date.year, date.month, date.day, tzinfo=timezone.utc)
+    day_end = day_start + timedelta(days=1)
+
     summary = (
         db.query(
-            func.sum(FoodLog.calories).label("calories"),
-            func.sum(FoodLog.protein).label("protein_g"),
-            func.sum(FoodLog.carbs).label("carbs_g"),
-            func.sum(FoodLog.fat).label("fat_g"),
+            func.coalesce(func.sum(FoodLog.calories), 0).label("calories"),
+            func.coalesce(func.sum(FoodLog.protein), 0).label("protein_g"),
+            func.coalesce(func.sum(FoodLog.carbs), 0).label("carbs_g"),
+            func.coalesce(func.sum(FoodLog.fat), 0).label("fat_g"),
         )
         .filter(
-            FoodLog.user_id == current_user.id, func.date(FoodLog.logged_at) == date
+            FoodLog.user_id == current_user.id,
+            FoodLog.logged_at >= day_start,
+            FoodLog.logged_at < day_end,
         )
-        .group_by(func.date(FoodLog.logged_at))
         .first()
     )
 
@@ -63,12 +67,17 @@ def get_food_logs_for_date(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user),
 ):
+    day_start = datetime(date.year, date.month, date.day, tzinfo=timezone.utc)
+    day_end = day_start + timedelta(days=1)
+
     food_logs = (
         db.query(FoodLog)
         .filter(
             FoodLog.user_id == current_user.id,
-            func.date(FoodLog.logged_at) == date,
+            FoodLog.logged_at >= day_start,
+            FoodLog.logged_at < day_end,
         )
+        .order_by(FoodLog.logged_at.asc())
         .all()
     )
     return food_logs
@@ -82,12 +91,17 @@ def get_food_logs_for_date_public(
     dummy_user = db.query(User).filter(User.email == "dummy@example.com").first()
     if not dummy_user:
         return []
+    day_start = datetime(date.year, date.month, date.day, tzinfo=timezone.utc)
+    day_end = day_start + timedelta(days=1)
+
     food_logs = (
         db.query(FoodLog)
         .filter(
             FoodLog.user_id == dummy_user.id,
-            func.date(FoodLog.logged_at) == date,
+            FoodLog.logged_at >= day_start,
+            FoodLog.logged_at < day_end,
         )
+        .order_by(FoodLog.logged_at.asc())
         .all()
     )
     return food_logs
@@ -102,17 +116,21 @@ def get_daily_food_log_summary_public(
     if not dummy_user:
         return DailyFoodLogSummary(calories=0.0, protein_g=0.0, carbs_g=0.0, fat_g=0.0)
 
+    day_start = datetime(date.year, date.month, date.day, tzinfo=timezone.utc)
+    day_end = day_start + timedelta(days=1)
+
     summary = (
         db.query(
-            func.sum(FoodLog.calories).label("calories"),
-            func.sum(FoodLog.protein).label("protein_g"),
-            func.sum(FoodLog.carbs).label("carbs_g"),
-            func.sum(FoodLog.fat).label("fat_g"),
+            func.coalesce(func.sum(FoodLog.calories), 0).label("calories"),
+            func.coalesce(func.sum(FoodLog.protein), 0).label("protein_g"),
+            func.coalesce(func.sum(FoodLog.carbs), 0).label("carbs_g"),
+            func.coalesce(func.sum(FoodLog.fat), 0).label("fat_g"),
         )
         .filter(
-            FoodLog.user_id == dummy_user.id, func.date(FoodLog.logged_at) == date
+            FoodLog.user_id == dummy_user.id,
+            FoodLog.logged_at >= day_start,
+            FoodLog.logged_at < day_end,
         )
-        .group_by(func.date(FoodLog.logged_at))
         .first()
     )
 

@@ -19,6 +19,7 @@ import javax.inject.Inject
 import java.time.ZoneId
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.ZoneOffset
 
 @HiltViewModel
 class DailyLogViewModel @Inject constructor(
@@ -67,7 +68,8 @@ class DailyLogViewModel @Inject constructor(
                         val remoteLogs = remoteRepository.fetchFoodLogsForDate(localDate).getOrNull()
                         if (!remoteLogs.isNullOrEmpty()) {
                             remoteLogs.forEach { rl: FoodLogResponse ->
-                                val epochMillis = toEpochMillis(rl.loggedAt)
+                                // Remote timestamps are UTC; convert accordingly to avoid TZ shifts
+                                val epochMillis = toEpochMillisUtc(rl.loggedAt)
                                 // Trust server values as-is; no rescaling heuristics.
                                 repository.insertFoodLog(
                                     FoodLog(
@@ -99,7 +101,8 @@ class DailyLogViewModel @Inject constructor(
                         val remoteSports = remoteRepository.fetchSportActivitiesForDate(localDate).getOrNull()
                         if (!remoteSports.isNullOrEmpty()) {
                             remoteSports.forEach { rs: SportActivityResponse ->
-                                val epochMillis = toEpochMillis(rs.loggedAt)
+                                // Remote timestamps are UTC; convert accordingly to avoid TZ shifts
+                                val epochMillis = toEpochMillisUtc(rs.loggedAt)
                                 repository.insertSportActivity(
                                     com.nutrition.app.data.local.entities.SportActivity(
                                         activityName = rs.activityName,
@@ -121,4 +124,7 @@ class DailyLogViewModel @Inject constructor(
 
     private fun toEpochMillis(dt: LocalDateTime): Long =
         dt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+
+    private fun toEpochMillisUtc(dt: LocalDateTime): Long =
+        dt.atZone(ZoneOffset.UTC).toInstant().toEpochMilli()
 }

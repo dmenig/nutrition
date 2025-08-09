@@ -73,7 +73,7 @@ This repo includes scripts and data to fill the production database with food de
 - Key files:
   - `data/variables.csv`: food nutrient data per 100g (source of truth for foods)
   - `data/processed_journal.csv`: journal of daily food formulas and weights
-  - `app/db/populate_db.py`: populates `foods` and `food_logs` tables
+  - `app/db/populate_db.py`: populates `foods`, `food_logs`, and `sport_activities` tables
   - `verify_day_vs_db.py`: compares CSV totals vs DB for a given date
 
 - One-time setup (recommended):
@@ -86,18 +86,34 @@ This repo includes scripts and data to fill the production database with food de
 - DB configuration source of truth:
   - The default `DATABASE_URL` is defined in code in `app/core/config.py` (`Settings.DATABASE_URL`).
   - Settings are loaded via `pydantic-settings`, which reads `.env` and `.env.local` automatically. Any value set in the environment or these files will override the in-code default.
-  - For docker-compose, `.env` already contains `DATABASE_URL=postgresql://user:password@db:5432/nutrition_db` so containers can talk to the Postgres service at host `db`.
+  - For docker-compose, `.env` already contains `DATABASE_URL=postgresql://user:password@db:5432/nutrition_db` so containers can talk to the Postgres service at host `db`. If you run Alembic from the host, ensure `DATABASE_URL` points to Neon (not `db`/localhost) to avoid connection errors.
+
+- Prepare CSVs (if you haven’t already processed the Excel journal):
+  ```bash
+  . .venv/bin/activate
+  PYTHONPATH=. python process_nutrition_journal.py
+  # Produces data/processed_journal.csv and data/variables.csv
+  ```
 
 - Populate tables (using the in-code Neon default or your override):
   ```bash
   . .venv/bin/activate
   # .env/.env.local overrides are picked up automatically
+  # Option A (recommended): module execution avoids import issues
+  PYTHONPATH=. python -m app.db.populate_db
+  # Option B: direct script execution
   PYTHONPATH=. python app/db/populate_db.py
   ```
   Notes:
   - The script first (re)populates `foods` from `data/variables.csv`.
   - It then parses each `Nourriture` formula in `data/processed_journal.csv` and inserts rows in `food_logs`.
+  - It also parses the `Sport` expressions from the same CSV, evaluates calories using `sport_formulas.py` (with the day’s weight), infers activity name and duration, and inserts rows in `sport_activities`.
   - Formula parsing supports nested groups and division (e.g. `a*(b+c)/3`). Numeric factors are correctly distributed. All numeric coefficients represent counts of 100g servings (e.g., `15*schweppes_zero` → 1500 g). The Android app treats entered quantities strictly as counts of 100g servings (input “1.5” means 150 g).
+
+  - Sports-only run (re-fill only sports without touching foods/logs):
+    ```bash
+    DATABASE_URL='<neon-url>' PYTHONPATH=. python -c "from app.db.populate_db import populate_sport_activities_table, verify_population; populate_sport_activities_table(); verify_population()"
+    ```
 
 - Alternative: populate/verify against the local docker DB (inside the container):
   ```bash
@@ -118,8 +134,16 @@ This repo includes scripts and data to fill the production database with food de
 
 - Troubleshooting:
   - If you see `Could not parse SQLAlchemy URL`: ensure an effective `DATABASE_URL` is available (in-code default, env var, or `.env(.local)`).
-  - If you see `could not translate host name "db"`: you're running from the host while pointing to the compose DB. Either run the command inside the container (see alternative above) or override `DATABASE_URL` to a reachable host (e.g., Neon URL).
-  - If imports fail, add the project root to `PYTHONPATH`: `PYTHONPATH=. python app/db/populate_db.py`.
+  - If you see `could not translate host name "db"`: you're running from the host while pointing to the compose DB. Either run the command inside the container (see alternative above) or override `DATABASE_URL` to Neon.
+  - If imports fail (e.g., `ModuleNotFoundError: utils` or `pydantic_settings`), ensure the venv is activated and prefer module execution with an explicit project root on `PYTHONPATH`:
+    - `PYTHONPATH=. python -m app.db.populate_db`
+  - If `data/processed_journal.csv` is missing, run: `PYTHONPATH=. python process_nutrition_journal.py` first.
+  - If a populate command appears to “hang”: it’s usually waiting on a DB host that isn’t reachable (e.g., `db` from docker-compose when running on the host). Quick check:
+    ```bash
+    DATABASE_URL='<neon-url>' PYTHONPATH=. python app/verify_db.py
+    ```
+    If this works, re-run the populate command with `DATABASE_URL` set to Neon or run the populate inside the container so `db` resolves.
+  - If `pip install` fails with an externally-managed environment (PEP 668), create and use a virtualenv (as shown above) instead of system Python.
 
 ### Android Emulator (AVD) setup
 
@@ -161,6 +185,20 @@ This repo includes scripts and data to fill the production database with food de
   - Default base URL is production (set in `android_app/app/src/main/java/com/nutrition/app/di/AppModule.kt`). Actions in the emulator will affect prod data.
   - To use a local backend from the emulator, set `.baseUrl("http://10.0.2.2:<port>/")` in `AppModule.provideRetrofit` and rebuild.
 
+
+## Backend performance & DB tuning
+
+- Index-friendly day queries:
+  - Replace `DATE(logged_at)` filters with a UTC range: `[day_start, day_end)`. This enables index usage on `logged_at`.
+- Composite indexes (added):
+  - `food_logs(user_id, logged_at)` and `sport_activities(user_id, logged_at)`.
+  - Apply: `. .venv/bin/activate && alembic upgrade head` (uses Neon by default).
+- Verify indexes exist (example via psql):
+  - `\d+ food_logs` and `\d+ sport_activities` should list `ix_*_user_id_logged_at`.
+- SQLAlchemy engine (Neon):
+  - We enable `pool_pre_ping=True` and `pool_recycle=300` in `app/db/database.py` to avoid stale connections.
+- Alembic config notes:
+  - `migrations/env.py` uses `settings.DATABASE_URL`. Ensure it points to Neon when running migrations locally. If you previously had Alembic trying `localhost`/`db`, update `.env` or export `DATABASE_URL` to Neon, then rerun `alembic upgrade head`.
 
 ### ADB over TCP/IP via Tailscale (wireless install)
 

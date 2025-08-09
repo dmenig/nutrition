@@ -87,14 +87,14 @@ class SafeSportFormulaEvaluator(SafeFormulaEvaluator):
     """
 
     def visit_Call(self, node):
-        """Handles whitelisted function calls."""
+        """Handles whitelisted function calls (case-insensitive names)."""
         if isinstance(node.func, ast.Name):
-            func_name = node.func.id
-            if func_name in self.context and callable(self.context[func_name]):
+            # Normalize to uppercase so formulas can use any case, e.g., running_calories(...)
+            func_name_upper = node.func.id.upper()
+            if func_name_upper in self.context and callable(self.context[func_name_upper]):
                 args = [self.visit(arg) for arg in node.args]
                 kwargs = {kw.arg: self.visit(kw.value) for kw in node.keywords}
-                return self.context[func_name](*args, **kwargs)
-        if isinstance(node.func, ast.Name):
-            func_name = node.func.id
-            raise NameError(f"Function '{func_name}' is not allowed.")
+                return self.context[func_name_upper](*args, **kwargs)
+            # Fallthrough: function name present but not allowed
+            raise NameError(f"Function '{node.func.id}' is not allowed.")
         raise NameError("Indirect function calls are not allowed.")

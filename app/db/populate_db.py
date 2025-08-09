@@ -6,7 +6,7 @@ import ast
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine, text
 from utils import SafeFormulaEvaluator, normalize_food_names
-from app.db.models import Base, Food, FoodLog, User
+from app.db.models import Base, Food, FoodLog, User, SportActivity
 from app.core.config import settings
 
 engine = create_engine(settings.DATABASE_URL)
@@ -288,11 +288,135 @@ def verify_population():
         food_log_count = connection.execute(
             text("SELECT COUNT(*) FROM food_logs")
         ).scalar_one()
+        sport_count = connection.execute(
+            text("SELECT COUNT(*) FROM sport_activities")
+        ).scalar_one()
         print(f"Rows in foods: {food_count}")
         print(f"Rows in food_logs: {food_log_count}")
+        print(f"Rows in sport_activities: {sport_count}")
+
+def _parse_sport_info_from_expression(expr: str) -> tuple[str, int]:
+    """
+    Extracts activity name (humanized) and duration_minutes from a sport formula expression.
+    Handles expressions that are sums/products by finding the first function call anywhere
+    in the AST and reading its name and first duration argument.
+    Returns (activity_name, duration_minutes). If parsing fails, returns ("Unknown", 0).
+    """
+    try:
+        import ast
+
+        def find_first_call(n: ast.AST) -> ast.Call | None:
+            if isinstance(n, ast.Call):
+                return n
+            for child in ast.iter_child_nodes(n):
+                found = find_first_call(child)
+                if found is not None:
+                    return found
+            return None
+
+        root = ast.parse(expr, mode="eval")
+        call = find_first_call(root.body)
+        if call and isinstance(call.func, ast.Name):
+            func_name = call.func.id.upper()
+            mapping = {
+                "WALKING_CALORIES": "Walking",
+                "RUNNING_CALORIES": "Running",
+                "CYCLING_CALORIES": "Cycling",
+            }
+            activity_name = mapping.get(func_name, func_name.title())
+            duration = 0
+            for kw in getattr(call, "keywords", []) or []:
+                if kw.arg == "duration_minutes":
+                    if isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, (int, float)):
+                        duration = int(kw.value.value)
+                        break
+            if duration == 0 and getattr(call, "args", []):
+                first_arg = call.args[0]
+                if isinstance(first_arg, ast.Constant) and isinstance(first_arg.value, (int, float)):
+                    duration = int(first_arg.value)
+            return activity_name, duration
+    except Exception:
+        return "Unknown", 0
+    return "Unknown", 0
 
 
-if __name__ == "__main__":
+def populate_sport_activities_table():
+    Base.metadata.create_all(bind=engine)
+    db = SessionLocal()
+    try:
+        # Ensure dummy user exists (reuse creation logic from food logs)
+        dummy_user = db.query(User).filter(User.email == "dummy@example.com").first()
+        if not dummy_user:
+            from sqlalchemy import text
+            import uuid
+            user_id = str(uuid.uuid4())
+            result = db.execute(
+                text(
+                    """
+                INSERT INTO users (id, email, hashed_password, username)
+                VALUES (:id, :email, :hashed_password, :username)
+                RETURNING id
+            """
+                ),
+                {
+                    "id": user_id,
+                    "email": "dummy@example.com",
+                    "hashed_password": "dummy_hashed_password",
+                    "username": "dummy",
+                },
+            )
+            db.commit()
+            user_id = result.fetchone()[0]
+            dummy_user = db.query(User).filter(User.id == user_id).first()
+
+        # Load journal data
+        journal_df = pd.read_csv("data/processed_journal.csv")
+
+        # Clear existing sports for dummy user before repopulating
+        db.query(SportActivity).filter(SportActivity.user_id == dummy_user.id).delete()
+        db.commit()
+
+        from sport_formulas import evaluate_sport_formula
+
+        inserted = 0
+        for _, row in journal_df.iterrows():
+            if pd.isna(row.get("Sport")) or str(row["Sport"]).strip() == "":
+                continue
+            date = pd.to_datetime(row["Date"])  # pandas Timestamp
+            weight = float(row.get("Pds", 0) or 0)
+            expr = str(row["Sport"]).lstrip("=")
+            # Substitute WEIGHT with actual value for safe evaluation
+            expr_eval = expr.replace("WEIGHT", str(weight))
+            try:
+                calories_expended = float(evaluate_sport_formula(expr_eval))
+            except Exception:
+                calories_expended = 0.0
+            activity_name, duration_minutes = _parse_sport_info_from_expression(expr)
+            sa = SportActivity(
+                user_id=dummy_user.id,
+                activity_name=activity_name,
+                duration_minutes=duration_minutes,
+                calories_expended=calories_expended,
+                logged_at=date,
+            )
+            db.add(sa)
+            inserted += 1
+            if inserted % 50 == 0:
+                db.commit()
+        db.commit()
+        print(f"SportActivity table populated from journal CSV! Inserted {inserted} rows.")
+    finally:
+        db.close()
+
+
+def main():
+    """Populate foods, food logs, and sport activities, then print counts."""
     populate_food_table()
     populate_food_log_table()
+    populate_sport_activities_table()
     verify_population()
+
+
+# Direct script execution or `python -m app.db.populate_db` only
+if __name__ == "__main__":
+    main()
