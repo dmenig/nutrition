@@ -66,6 +66,53 @@ Notes:
 - Add an API: define service interface under `data/remote`, provide it in a DI module using the named Retrofit, inject into a repository/view model.
 
 
+### Populate the Production Database (Neon)
+
+This repo includes scripts and data to fill the production database with food definitions and daily logs parsed from your CSVs.
+
+- Key files:
+  - `data/variables.csv`: food nutrient data per 100g (source of truth for foods)
+  - `data/processed_journal.csv`: journal of daily food formulas and weights
+  - `app/db/populate_db.py`: populates `foods` and `food_logs` tables
+  - `verify_day_vs_db.py`: compares CSV totals vs DB for a given date
+
+- One-time setup (recommended):
+  ```bash
+  python3 -m venv .venv
+  . .venv/bin/activate
+  python -m pip install -r requirements.txt
+  ```
+
+- Configure DB connection (Neon):
+  - Create `.env.local` in repo root with:
+    ```env
+    DATABASE_URL=postgresql://<user>:<pass>@<neon-host>/<db>?sslmode=require
+    ```
+  - Alternatively: `export DATABASE_URL=...` in your shell session.
+
+- Populate tables:
+  ```bash
+  . .venv/bin/activate
+  # Load .env and .env.local automatically via pydantic-settings
+  PYTHONPATH=. python app/db/populate_db.py
+  ```
+  Notes:
+  - The script first (re)populates `foods` from `data/variables.csv`.
+  - It then parses each `Nourriture` formula in `data/processed_journal.csv` and inserts rows in `food_logs`.
+  - Formula parsing supports nested groups and division (e.g. `a*(b+c)/3`). Numeric factors are correctly distributed. Coefficients are interpreted as counts of 100g servings (e.g., `15*schweppes_zero` → 1500g).
+
+- Verify population:
+  ```bash
+  PYTHONPATH=. python app/verify_db.py
+  # Or per-day comparison (example date):
+  PYTHONPATH=. python verify_day_vs_db.py --date 2025-05-03
+  ```
+
+- Troubleshooting:
+  - If you see `Could not parse SQLAlchemy URL`: ensure `DATABASE_URL` is set.
+  - If you see `could not translate host name "db"`: your `.env` likely points to a docker-compose host; use your Neon URL instead.
+  - If imports fail, add the project root to `PYTHONPATH`: `PYTHONPATH=. python app/db/populate_db.py`.
+
 ### Android Emulator (AVD) setup
 
 - **Install SDK tools (one-time)**
