@@ -5,7 +5,7 @@ import re
 import ast
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine, text
-from utils import SafeFormulaEvaluator, normalize_food_names
+from utils import SafeFormulaEvaluator, SafeSportFormulaEvaluator, normalize_food_names
 from app.db.models import Base, Food, FoodLog, User, SportActivity
 from app.core.config import settings
 
@@ -295,49 +295,134 @@ def verify_population():
         print(f"Rows in food_logs: {food_log_count}")
         print(f"Rows in sport_activities: {sport_count}")
 
-def _parse_sport_info_from_expression(expr: str) -> tuple[str, int]:
+def _extract_sport_calls_with_calories(expr_eval: str) -> list[tuple[str, int, float]]:
     """
-    Extracts activity name (humanized) and duration_minutes from a sport formula expression.
-    Handles expressions that are sums/products by finding the first function call anywhere
-    in the AST and reading its name and first duration argument.
-    Returns (activity_name, duration_minutes). If parsing fails, returns ("Unknown", 0).
+    Finds every whitelisted sport function call in the expression and returns a list of
+    tuples: (activity_name, duration_minutes, calories_for_that_call).
+
+    Notes:
+    - Assumes the expression already has WEIGHT substituted with a numeric value.
+    - If a call's duration cannot be inferred, 0 is used.
+    - If evaluation fails for a call, its calories default to 0.0.
     """
+    import ast
+    from sport_formulas import SPORT_FUNCTIONS
+
+    def humanize(name_upper: str) -> str:
+        mapping = {
+            "WALKING_CALORIES": "Walking",
+            "RUNNING_CALORIES": "Running",
+            "CYCLING_CALORIES": "Cycling",
+        }
+        return mapping.get(name_upper, name_upper.title())
+
     try:
-        import ast
+        root = ast.parse(expr_eval, mode="eval")
+    except SyntaxError:
+        return []
 
-        def find_first_call(n: ast.AST) -> ast.Call | None:
-            if isinstance(n, ast.Call):
-                return n
-            for child in ast.iter_child_nodes(n):
-                found = find_first_call(child)
-                if found is not None:
-                    return found
-            return None
+    evaluator = SafeSportFormulaEvaluator(SPORT_FUNCTIONS)
+    calls: list[tuple[str, int, float]] = []
 
-        root = ast.parse(expr, mode="eval")
-        call = find_first_call(root.body)
-        if call and isinstance(call.func, ast.Name):
-            func_name = call.func.id.upper()
-            mapping = {
-                "WALKING_CALORIES": "Walking",
-                "RUNNING_CALORIES": "Running",
-                "CYCLING_CALORIES": "Cycling",
-            }
-            activity_name = mapping.get(func_name, func_name.title())
-            duration = 0
-            for kw in getattr(call, "keywords", []) or []:
+    def is_pure_numeric(node: ast.AST) -> bool:
+        try:
+            # Will raise if it requires a sport function
+            evaluator.visit(node)
+            return True
+        except Exception:
+            return False
+
+    def has_call(node: ast.AST) -> bool:
+        if isinstance(node, ast.Call):
+            return True
+        return any(has_call(child) for child in ast.iter_child_nodes(node))
+
+    def extract_calls(node: ast.AST, factor: float = 1.0) -> None:
+        # Direct call
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            func_upper = node.func.id.upper()
+            activity_name = humanize(func_upper)
+            duration_minutes = 0
+            # Prefer keyword argument
+            for kw in getattr(node, "keywords", []) or []:
                 if kw.arg == "duration_minutes":
-                    if isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, (int, float)):
-                        duration = int(kw.value.value)
-                        break
-            if duration == 0 and getattr(call, "args", []):
-                first_arg = call.args[0]
-                if isinstance(first_arg, ast.Constant) and isinstance(first_arg.value, (int, float)):
-                    duration = int(first_arg.value)
-            return activity_name, duration
-    except Exception:
-        return "Unknown", 0
-    return "Unknown", 0
+                    try:
+                        duration_val = evaluator.visit(kw.value)
+                        duration_minutes = int(round(float(duration_val)))
+                    except Exception:
+                        duration_minutes = 0
+                    break
+            # Fallback to first positional arg
+            if duration_minutes == 0 and getattr(node, "args", []):
+                try:
+                    duration_val = evaluator.visit(node.args[0])
+                    duration_minutes = int(round(float(duration_val)))
+                except Exception:
+                    duration_minutes = 0
+            # Base calories for this call
+            try:
+                base_cal = float(evaluator.visit(node))
+            except Exception:
+                base_cal = 0.0
+            calls.append((activity_name, duration_minutes, base_cal * factor))
+            return
+
+        # Binary operations can scale calls
+        if isinstance(node, ast.BinOp):
+            op = node.op
+            left, right = node.left, node.right
+            left_has = has_call(left)
+            right_has = has_call(right)
+            # Multiplication
+            if isinstance(op, ast.Mult):
+                if left_has and is_pure_numeric(right):
+                    scale = float(evaluator.visit(right))
+                    extract_calls(left, factor * scale)
+                    return
+                if right_has and is_pure_numeric(left):
+                    scale = float(evaluator.visit(left))
+                    extract_calls(right, factor * scale)
+                    return
+                # Both sides have calls or non-numeric scale → distribute
+                extract_calls(left, factor)
+                extract_calls(right, factor)
+                return
+            # Division
+            if isinstance(op, ast.Div):
+                if left_has and is_pure_numeric(right):
+                    scale = float(evaluator.visit(right))
+                    if scale != 0:
+                        extract_calls(left, factor / scale)
+                    else:
+                        extract_calls(left, factor)
+                    return
+                # If call on right or non-numeric denominator, distribute
+                extract_calls(left, factor)
+                extract_calls(right, factor)
+                return
+            # Addition/Subtraction → no scaling, just traverse
+            extract_calls(left, factor)
+            if isinstance(op, ast.Sub):
+                # Negative factor for right side
+                extract_calls(right, -factor)
+            else:
+                extract_calls(right, factor)
+            return
+
+        # Unary +/- operators
+        if isinstance(node, ast.UnaryOp):
+            if isinstance(node.op, ast.USub):
+                extract_calls(node.operand, -factor)
+            else:
+                extract_calls(node.operand, factor)
+            return
+
+        # Generic traversal
+        for child in ast.iter_child_nodes(node):
+            extract_calls(child, factor)
+
+    extract_calls(root.body, 1.0)
+    return calls
 
 
 def populate_sport_activities_table():
@@ -387,20 +472,36 @@ def populate_sport_activities_table():
             expr = str(row["Sport"]).lstrip("=")
             # Substitute WEIGHT with actual value for safe evaluation
             expr_eval = expr.replace("WEIGHT", str(weight))
-            try:
-                calories_expended = float(evaluate_sport_formula(expr_eval))
-            except Exception:
-                calories_expended = 0.0
-            activity_name, duration_minutes = _parse_sport_info_from_expression(expr)
-            sa = SportActivity(
-                user_id=dummy_user.id,
-                activity_name=activity_name,
-                duration_minutes=duration_minutes,
-                calories_expended=calories_expended,
-                logged_at=date,
-            )
-            db.add(sa)
-            inserted += 1
+
+            # Split into individual calls so DB rows match the journal entries
+            calls = _extract_sport_calls_with_calories(expr_eval)
+
+            if calls:
+                for activity_name, duration_minutes, calories_expended in calls:
+                    sa = SportActivity(
+                        user_id=dummy_user.id,
+                        activity_name=activity_name,
+                        duration_minutes=duration_minutes,
+                        calories_expended=calories_expended,
+                        logged_at=date,
+                    )
+                    db.add(sa)
+                    inserted += 1
+            else:
+                # Fallback: evaluate whole expression and attach unknown metadata
+                try:
+                    calories_expended = float(evaluate_sport_formula(expr_eval))
+                except Exception:
+                    calories_expended = 0.0
+                sa = SportActivity(
+                    user_id=dummy_user.id,
+                    activity_name="Unknown",
+                    duration_minutes=0,
+                    calories_expended=calories_expended,
+                    logged_at=date,
+                )
+                db.add(sa)
+                inserted += 1
             if inserted % 50 == 0:
                 db.commit()
         db.commit()
