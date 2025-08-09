@@ -298,7 +298,7 @@ def verify_population():
 def _extract_sport_calls_with_calories(expr_eval: str) -> list[tuple[str, int, float, float | None, float | None]]:
     """
     Finds every whitelisted sport function call in the expression and returns a list of
-    tuples: (activity_name, duration_minutes, calories_for_that_call).
+    tuples: (activity_name, duration_minutes, calories_for_that_call, carried_weight_kg, distance_m).
 
     Notes:
     - Assumes the expression already has WEIGHT substituted with a numeric value.
@@ -383,7 +383,26 @@ def _extract_sport_calls_with_calories(expr_eval: str) -> list[tuple[str, int, f
                 base_cal = float(evaluator.visit(node))
             except Exception:
                 base_cal = 0.0
-            calls.append((activity_name, duration_minutes, base_cal * factor, add_weight_val, distance_m_val))
+
+            # Propagate numeric multipliers/divisors to both calories and physical quantities
+            # - Scale calories by the factor (can be fractional or negative)
+            # - Scale duration and distance by abs(factor) so UI reflects repeated/combined effort
+            scale_abs = abs(float(factor)) if isinstance(factor, (int, float)) else 1.0
+            scaled_duration = int(round(duration_minutes * scale_abs)) if duration_minutes else 0
+            scaled_distance = (
+                float(distance_m_val) * scale_abs if distance_m_val is not None else None
+            )
+            scaled_calories = base_cal * float(factor)
+
+            calls.append(
+                (
+                    activity_name,
+                    scaled_duration,
+                    scaled_calories,
+                    add_weight_val,
+                    scaled_distance,
+                )
+            )
             return
 
         # Binary operations can scale calls
@@ -486,7 +505,12 @@ def populate_sport_activities_table():
         for _, row in journal_df.iterrows():
             if pd.isna(row.get("Sport")) or str(row["Sport"]).strip() == "":
                 continue
-            date = pd.to_datetime(row["Date"])  # pandas Timestamp
+            # Normalize to UTC midnight to match API day filtering (UTC boundaries)
+            from datetime import datetime, timezone as dt_timezone
+            date_ts = pd.to_datetime(row["Date"])  # pandas Timestamp (date-only)
+            date = datetime(
+                date_ts.year, date_ts.month, date_ts.day, tzinfo=dt_timezone.utc
+            )
             weight = float(row.get("Pds", 0) or 0)
             expr = str(row["Sport"]).lstrip("=")
             # Substitute WEIGHT with actual value for safe evaluation

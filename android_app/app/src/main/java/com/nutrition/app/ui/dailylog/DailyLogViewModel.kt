@@ -100,6 +100,8 @@ class DailyLogViewModel @Inject constructor(
                         val localDate = date.toInstant().atZone(ZoneId.systemDefault()).toLocalDate()
                         val remoteSports = remoteRepository.fetchSportActivitiesForDate(localDate).getOrNull()
                         if (!remoteSports.isNullOrEmpty()) {
+                            // Replace local day's activities with server truth to avoid duplicates or drifts
+                            repository.deleteActivitiesForDay(startOfDay, endOfDay)
                             remoteSports.forEach { rs: SportActivityResponse ->
                                 // Remote timestamps are UTC; convert accordingly to avoid TZ shifts
                                 val epochMillis = toEpochMillisUtc(rs.loggedAt)
