@@ -62,8 +62,18 @@ fun FoodEntryForm(
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedTextField(
                 value = currentQuantity,
-                onValueChange = { currentQuantity = it },
+                onValueChange = { input ->
+                    // Allow only digits and optional decimal point
+                    val sanitized = input.replace("[^0-9.]".toRegex(), "")
+                    currentQuantity = sanitized
+                },
                 label = { Text("Quantity (g)") },
+                isError = currentQuantity.isBlank() || (currentQuantity.toFloatOrNull() ?: 0f) <= 0f,
+                supportingText = {
+                    if (currentQuantity.isBlank() || (currentQuantity.toFloatOrNull() ?: 0f) <= 0f) {
+                        Text("Enter a quantity > 0")
+                    }
+                },
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(modifier = Modifier.height(8.dp))
@@ -102,6 +112,7 @@ fun FoodEntryForm(
                 }
                 Spacer(modifier = Modifier.width(8.dp))
                 Button(onClick = {
+                    if ((currentQuantity.toFloatOrNull() ?: 0f) <= 0f) return@Button
                     onSave(
                         currentFoodName,
                         currentQuantity,

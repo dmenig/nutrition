@@ -32,7 +32,11 @@ class FoodEntryViewModel @Inject constructor(
         viewModelScope.launch {
             val food = nutritionRepository.searchFoods(foodName).getOrNull()?.firstOrNull()
             if (food != null) {
-                val parsedQuantity = quantity.toFloatOrNull() ?: 0f
+                val parsedQuantity = quantity.toFloatOrNull()
+                if (parsedQuantity == null || parsedQuantity <= 0f) {
+                    _uiEvent.send(FoodEntryUiEvent.ShowError("Enter a quantity greater than 0 g"))
+                    return@launch
+                }
                 // Heuristic aligned with backend/demo population:
                 // If quantity <= 10, interpret as number of 100g servings; else treat as grams.
                 val quantityInGrams = if (parsedQuantity <= 10f) parsedQuantity * 100f else parsedQuantity

@@ -192,6 +192,10 @@ def populate_food_log_table():
             dummy_user = db.query(User).filter(User.id == user_id).first()
 
         default_user_id = dummy_user.id
+
+        # Clear existing logs for dummy user before repopulating
+        db.query(FoodLog).filter(FoodLog.user_id == default_user_id).delete()
+        db.commit()
         # Process each row in the journal
         for _, row in journal_df.iterrows():
             date = pd.to_datetime(row["Date"])
@@ -212,9 +216,15 @@ def populate_food_log_table():
 
             # Parse the formula to extract food items and quantities
             food_items = parse_food_formula(food_formula)
+            if not food_items:
+                raise ValueError(f"No food items parsed for date {date} with formula '{food_formula}'")
 
             # Create a FoodLog entry for each food item
             for quantity, normalized_food_name in food_items:
+                if quantity is None or float(quantity) == 0:
+                    raise ValueError(
+                        f"Zero quantity for food '{normalized_food_name}' on {date} in formula '{food_formula}'"
+                    )
                 # Get the original food name
                 food_name = reverse_food_name_mapping.get(
                     normalized_food_name, normalized_food_name
@@ -249,7 +259,7 @@ def populate_food_log_table():
                 food_log = FoodLog(
                     user_id=default_user_id,
                     food_name=food_name,
-                    quantity=quantity,
+                    quantity=quantity_in_grams,
                     unit="g",
                     calories=calories,
                     protein=protein,
