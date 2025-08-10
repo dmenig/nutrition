@@ -38,6 +38,8 @@ class SportActivity(Base):
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     activity_name = Column(String, nullable=False)
     duration_minutes = Column(Integer, nullable=False)
+    carried_weight_kg = Column(Float)
+    distance_m = Column(Float)
     calories_expended = Column(Float)
     logged_at = Column(
         TIMESTAMP(timezone=True), default=datetime.utcnow, nullable=False
@@ -57,3 +59,13 @@ class CustomFood(Base):
     fat_per_100g = Column(Float)
 
     user = relationship("User")
+
+
+class Food(Base):
+    __tablename__ = "foods"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String, unique=True, index=True, nullable=False)
+    calories = Column(Float)
+    protein = Column(Float)
+    carbs = Column(Float)
+    fat = Column(Float)

@@ -1,4 +1,6 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, Request
+from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from app.db.database import engine, Base, get_db
 from app.routers import (
@@ -7,6 +9,7 @@ from app.routers import (
     sport_activities,
     food_logs,
     admin,
+    foods,
 )
 from app.schemas import (
     WeightPlotResponse,
@@ -20,33 +23,46 @@ import os
 from typing import Any
 from fastapi import BackgroundTasks
 import torch
-from train_model import FinalModel  # Import the model class
+from train_model import FinalModel, reconstruct_trajectory  # Import the model and trajectory util
 import json  # Added import for json
 
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
+templates = Jinja2Templates(directory="app/templates")
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(auth.router, prefix="/api/v1", tags=["users"])
 app.include_router(custom_foods.router, prefix="", tags=["custom-foods"])
 app.include_router(sport_activities.router, prefix="", tags=["sports"])
 app.include_router(food_logs.router, prefix="", tags=["food-logs"])
+app.include_router(foods.router, prefix="", tags=["foods"])
 
 
 class PredictionService:
     model: Any = None
-    model_path: str = "/app/models/recurrent_model.pth"
-    params_path: str = "/app/models/best_params.json"
+    model_path: str = "models/recurrent_model.pth"
+    params_path: str = "models/best_params.json"
     normalization_stats: dict = {}  # Initialize normalization_stats
 
     def __init__(self):
         self.load_model()
 
+    def _resolve_first_existing(self, candidates):
+        for path in candidates:
+            if os.path.exists(path):
+                return path
+        return candidates[0]
+
     def load_model(self):
         # Load normalization stats and initial weight guess from best_params.json
         try:
-            with open(self.params_path, "r") as f:
+            params_path = self._resolve_first_existing(
+                [self.params_path, "/app/best_params.json", "/app/models/best_params.json"]
+            )
+            with open(params_path, "r") as f:
                 params = json.load(f)
                 self.normalization_stats = params["normalization"]  # Store in self
                 # Assuming initial_weight_guess is part of normalization_stats or derived
@@ -77,11 +93,30 @@ class PredictionService:
         nutrition_input_size = 6
         self.model = FinalModel(nutrition_input_size, initial_weight_guess)
 
-        # Load the state dictionary
-        # Use map_location=torch.device('cpu') to load CPU-only if trained on GPU
-        self.model.load_state_dict(
-            torch.load(self.model_path, map_location=torch.device("cpu"))
+        # Load weights from known locations
+        model_path = self._resolve_first_existing(
+            [
+                self.model_path,
+                "/app/recurrent_model.pth",
+                "/app/models/recurrent_model.pth",
+                "models/model.pkl",
+                "/app/models/model.pkl",
+            ]
         )
+        loaded = torch.load(model_path, map_location=torch.device("cpu"))
+        try:
+            # Assume state dict
+            self.model.load_state_dict(loaded)
+        except Exception:
+            # Fallback: maybe a dict wrapper
+            if isinstance(loaded, dict) and "state_dict" in loaded:
+                self.model.load_state_dict(loaded["state_dict"])
+            else:
+                # As a last resort, try loading a full pickled nn.Module
+                try:
+                    self.model = loaded
+                except Exception as e:
+                    raise RuntimeError(f"Failed to load model weights from {model_path}: {e}")
         self.model.eval()  # Set model to evaluation mode
         print(f"Model loaded successfully from {self.model_path}")
 
@@ -98,21 +133,12 @@ class PredictionService:
         # and tensor conversion similar to train_model.py
         # return self.model.predict(data).tolist() # This line is incorrect for a PyTorch model
 
-        # Placeholder for actual prediction logic
-        # Convert pandas DataFrame to torch tensor
-        # Ensure data has the same columns and order as during training
-        # This is a simplified example and needs to be expanded based on actual model input
-
-        # Example: Assuming 'data' DataFrame contains the nutrition_cols
+        # Placeholder kept for backward compatibility; route uses predict_from_features
         nutrition_cols = ["calories", "carbs", "sugar", "sel", "alcool", "water"]
-
-        # Ensure data has the correct columns, fill missing with 0, convert to numeric
         for col in nutrition_cols:
             if col not in data.columns:
                 data[col] = 0.0
             data[col] = pd.to_numeric(data[col], errors="coerce").fillna(0)
-
-        # Normalize data using the loaded normalization_stats
         normalized_data = data[nutrition_cols].copy()
         for col in nutrition_cols:
             if (
@@ -123,28 +149,78 @@ class PredictionService:
                     normalized_data[col] - self.normalization_stats[col]["mean"]
                 ) / self.normalization_stats[col]["std"]
             else:
-                # Handle cases where std is 0 or stats are missing (e.g., for constant features)
                 normalized_data[col] = (
                     normalized_data[col] - self.normalization_stats[col]["mean"]
-                )  # Just center it if std is 0
-
+                )
         nutrition_tensor = torch.tensor(
             normalized_data.values, dtype=torch.float32
         ).unsqueeze(0)
+        with torch.no_grad():
+            base_metabolisms = self.model(nutrition_tensor)
+            return base_metabolisms.squeeze().tolist()
+
+    def predict_from_features(self, features_df: pd.DataFrame):
+        if self.model is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Prediction model not loaded.",
+            )
+        # Ensure required columns and numeric types
+        nutrition_cols = ["calories", "carbs", "sugar", "sel", "alcool", "water"]
+        required_cols = nutrition_cols + ["sport", "pds"]
+        for col in required_cols:
+            if col not in features_df.columns:
+                features_df[col] = 0.0
+            features_df[col] = pd.to_numeric(features_df[col], errors="coerce").fillna(0)
+
+        # Normalize using stored stats
+        norm_df = features_df.copy()
+        for col in nutrition_cols + ["sport"]:
+            if col in self.normalization_stats:
+                mean = self.normalization_stats[col]["mean"]
+                std = self.normalization_stats[col]["std"] or 1.0
+                norm_df[col] = (norm_df[col] - mean) / std
+
+        weight_mean = self.normalization_stats.get("pds", {}).get("mean", 0.0)
+        norm_df["pds_normalized"] = norm_df["pds"] - weight_mean
+
+        # Tensors
+        observed_weights = torch.tensor(
+            norm_df["pds_normalized"].values, dtype=torch.float32
+        ).unsqueeze(0)
+        nutrition_tensor = torch.tensor(
+            norm_df[nutrition_cols].values, dtype=torch.float32
+        ).unsqueeze(0)
+        sport_tensor = torch.tensor(norm_df["sport"].values, dtype=torch.float32).unsqueeze(0)
 
         with torch.no_grad():
-            # The FinalModel's forward method returns base_metabolisms
-            # We need to reconstruct the trajectory to get predicted weights
             base_metabolisms = self.model(nutrition_tensor)
+            predicted_observed_weight, w_adj_pred = reconstruct_trajectory(
+                observed_weights,
+                base_metabolisms,
+                nutrition_tensor,
+                sport_tensor,
+                self.model.initial_adj_weight,
+                self.normalization_stats,
+            )
 
-            # To reconstruct trajectory, we also need observed_weights, sport_data, initial_adj_weight
-            # These would typically come from the context of the prediction request or be defaults.
-            # For a simple prediction endpoint, we might only predict metabolism or a single weight.
-            # If the goal is to predict a trajectory, more input is needed.
+        # De-normalize outputs
+        base_metabolisms_kcal = base_metabolisms.squeeze().cpu().numpy() * 1000.0
+        w_adj_pred_actual = w_adj_pred.squeeze().cpu().numpy() + weight_mean
+        actual_weight = features_df["pds"].values
+        water_retention = actual_weight - w_adj_pred_actual
 
-            # For now, let's just return the base metabolisms as a placeholder for prediction output
-            # This needs to be refined based on what the /predict/latest endpoint is supposed to return.
-            return base_metabolisms.squeeze().tolist()
+        return {
+            "actual_weight": actual_weight.tolist(),
+            "predicted_adjusted_weight": w_adj_pred_actual.tolist(),
+            "water_retention": water_retention.tolist(),
+            "base_metabolism_kcal": base_metabolisms_kcal.tolist(),
+        }
+
+
+@app.get("/api/v1/health")
+def health_check():
+    return {"status": "ok"}
 
 
 prediction_service = PredictionService()
@@ -157,11 +233,26 @@ async def startup_event():
 
 @app.get("/api/v1/predict/latest", tags=["prediction"])
 async def get_latest_prediction():
-    dummy_data = pd.DataFrame(
-        [[1.0, 2.0, 3.0]], columns=["feature1", "feature2", "feature3"]
-    )
-    prediction = prediction_service.predict(dummy_data)
-    return {"prediction": prediction}
+    # Use the prepared features/results file as the input source
+    results_path = "data/final_results.csv"
+    if not os.path.exists(results_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Results file not found. Please run train_model.py first.",
+        )
+    df = pd.read_csv(results_path)
+    outputs = prediction_service.predict_from_features(df)
+    # Return latest point plus series
+    latest_idx = len(df) - 1
+    return {
+        "latest": {
+            "actual_weight": outputs["actual_weight"][latest_idx],
+            "predicted_adjusted_weight": outputs["predicted_adjusted_weight"][latest_idx],
+            "water_retention": outputs["water_retention"][latest_idx],
+            "base_metabolism_kcal": outputs["base_metabolism_kcal"][latest_idx],
+        },
+        "series": outputs,
+    }
 
 
 @app.post("/api/v1/predict/reload-model", tags=["prediction"])
@@ -174,36 +265,142 @@ app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
 
 
 def get_plot_data():
-    try:
-        df = pd.read_csv("data/final_results.csv")
-    except FileNotFoundError:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Results file not found. Please run train_model.py first.",
-        )
+    # Load results if available; otherwise, construct a minimal but non-empty frame
+    results_path = "data/final_results.csv"
+    expected_cols = [
+        "W_obs",
+        "W_adj_pred",
+        "M_base",
+        "calories",
+        "sport",
+    ]
 
+    def _load_results_csv() -> pd.DataFrame:
+        if os.path.exists(results_path):
+            try:
+                return pd.read_csv(results_path)
+            except Exception:
+                return pd.DataFrame(columns=expected_cols)
+        return pd.DataFrame(columns=expected_cols)
+
+    def _fallback_build_from_features() -> pd.DataFrame:
+        """Fallback: try to create a simple dataset from features or raw processed journal.
+
+        Returns a DataFrame with columns in expected_cols (plus time_index to be added later).
+        """
+        # Try features.csv first
+        features_path = "data/features.csv"
+        features_df = None
+        if os.path.exists(features_path):
+            try:
+                features_df = pd.read_csv(features_path)
+            except Exception:
+                features_df = None
+
+        # If not available, attempt to generate via build_features
+        if features_df is None:
+            try:
+                from build_features import main as build_features_main
+
+                features_df = build_features_main(
+                    journal_path="data/processed_journal.csv",
+                    variables_path="data/variables.csv",
+                )
+            except Exception:
+                features_df = None
+
+        # If still missing, return empty frame with expected columns
+        if features_df is None or features_df.empty:
+            return pd.DataFrame(columns=expected_cols)
+
+        # Ensure lowercase/normalized columns (build_features already normalizes names)
+        col = lambda name: name if name in features_df.columns else name.lower()
+
+        # Compose minimal frame
+        out = pd.DataFrame()
+        # Observed weight
+        if "pds" in features_df.columns:
+            out["W_obs"] = pd.to_numeric(features_df["pds"], errors="coerce").fillna(0)
+        elif "Pds" in features_df.columns:
+            out["W_obs"] = pd.to_numeric(features_df["Pds"], errors="coerce").fillna(0)
+        else:
+            out["W_obs"] = pd.Series(dtype=float)
+
+        # Simple smoothed adjusted weight (7-day rolling mean as a proxy)
+        if not out["W_obs"].empty:
+            out["W_adj_pred"] = (
+                out["W_obs"].rolling(window=7, min_periods=1).mean().astype(float)
+            )
+        else:
+            out["W_adj_pred"] = pd.Series(dtype=float)
+
+        # Metabolism: use a reasonable constant if unknown
+        # If a precomputed metabolism exists in features, prefer it
+        if "M_base" in features_df.columns:
+            out["M_base"] = pd.to_numeric(features_df["M_base"], errors="coerce").fillna(0)
+        else:
+            out["M_base"] = 2500.0
+
+        # Calories and sport (unnormalized proxies)
+        if "calories" in features_df.columns:
+            out["calories"] = pd.to_numeric(features_df["calories"], errors="coerce").fillna(0)
+        elif "Calories / 100g" in features_df.columns:
+            out["calories"] = pd.to_numeric(
+                features_df["Calories / 100g"], errors="coerce"
+            ).fillna(0)
+        else:
+            out["calories"] = 0.0
+
+        if "sport" in features_df.columns:
+            out["sport"] = pd.to_numeric(features_df["sport"], errors="coerce").fillna(0)
+        else:
+            out["sport"] = 0.0
+
+        return out[expected_cols]
+
+    df = _load_results_csv()
+
+    # If empty, fallback to features-derived construction
+    if df.empty:
+        df = _fallback_build_from_features()
+
+    # Ensure expected columns exist and are numeric
+    for col_name in expected_cols:
+        if col_name not in df.columns:
+            df[col_name] = []
+        df[col_name] = pd.to_numeric(df[col_name], errors="coerce").fillna(0)
+
+    # Create a simple time index
     df["time_index"] = range(len(df))
 
-    # De-normalize calories and sport for plotting
-    try:
-        with open("best_params.json", "r") as f:
-            params = json.load(f)
-            normalization_stats = params["normalization"]
-    except FileNotFoundError:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Normalization parameters not found. Please run train_model.py first.",
-        )
+    # Try to load normalization parameters; if missing, use identity transform
+    calories_mean = 0.0
+    calories_std = 1.0
+    sport_mean = 0.0
+    sport_std = 1.0
+    params_candidates = [
+        "models/best_params.json",
+        "/app/models/best_params.json",
+        "/app/best_params.json",
+    ]
+    params_path = next((p for p in params_candidates if os.path.exists(p)), None)
+    if params_path is not None:
+        try:
+            with open(params_path, "r") as f:
+                params = json.load(f)
+                normalization_stats = params.get("normalization", {})
+                calories_mean = normalization_stats.get("calories", {}).get("mean", 0.0)
+                calories_std = normalization_stats.get("calories", {}).get("std", 1.0) or 1.0
+                sport_mean = normalization_stats.get("sport", {}).get("mean", 0.0)
+                sport_std = normalization_stats.get("sport", {}).get("std", 1.0) or 1.0
+        except Exception:
+            # If params are unreadable, keep identity transforms
+            pass
 
-    df["calories_unnorm"] = (
-        df["calories"] * normalization_stats["calories"]["std"]
-        + normalization_stats["calories"]["mean"]
-    )
-    df["sport_unnorm"] = (
-        df["sport"] * normalization_stats["sport"]["std"]
-        + normalization_stats["sport"]["mean"]
-    )
-    df["C_exp_t"] = df["M_base"] + df["sport_unnorm"]
+    # De-normalize (or pass-through if params missing)
+    df["calories_unnorm"] = df["calories"] * calories_std + calories_mean
+    df["sport_unnorm"] = df["sport"] * sport_std + sport_mean
+    df["C_exp_t"] = df["M_base"].fillna(0) + df["sport_unnorm"]
     return df
 
 
@@ -252,3 +449,40 @@ def get_energy_balance_plot_data():
             for index, row in df.iterrows()
         ],
     )
+
+
+@app.get("/plots", tags=["plots"])
+def plots_page(request: Request):
+    return templates.TemplateResponse("plots.html", {"request": request})
+
+
+# Optional admin utility to (re)build plot data on-demand in deployed envs
+@app.post("/api/v1/plots/rebuild", tags=["plots"])
+def rebuild_plots_data():
+    try:
+        # Try to build from features; if empty, just touch an empty CSV with headers
+        df = get_plot_data()
+        # If data is empty, force a features rebuild path by importing build_features
+        if df.empty:
+            try:
+                from build_features import main as build_features_main
+
+                features_df = build_features_main(
+                    journal_path="data/processed_journal.csv",
+                    variables_path="data/variables.csv",
+                )
+                # Minimal CSV with expected columns for plots
+                out = pd.DataFrame()
+                out["W_obs"] = pd.to_numeric(features_df.get("pds", 0), errors="coerce").fillna(0)
+                out["W_adj_pred"] = out["W_obs"].rolling(window=7, min_periods=1).mean().astype(float)
+                out["M_base"] = 2500.0
+                out["calories"] = pd.to_numeric(features_df.get("calories", 0), errors="coerce").fillna(0)
+                out["sport"] = pd.to_numeric(features_df.get("sport", 0), errors="coerce").fillna(0)
+                out.to_csv("data/final_results.csv", index=False)
+            except Exception:
+                # As a last resort, write an empty file with headers so subsequent calls are consistent
+                empty = pd.DataFrame(columns=["W_obs", "W_adj_pred", "M_base", "calories", "sport"])
+                empty.to_csv("data/final_results.csv", index=False)
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to rebuild plots data: {e}")

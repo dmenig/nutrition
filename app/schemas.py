@@ -1,5 +1,6 @@
 from pydantic import BaseModel, EmailStr
-from typing import Optional
+from typing import Optional, Union
+from uuid import UUID
 
 
 class UserBase(BaseModel):
@@ -18,7 +19,7 @@ class UserInDB(UserBase):
 
 
 class UserOut(UserBase):
-    id: int
+    id: UUID
 
     class Config:
         from_attributes = True
@@ -31,9 +32,6 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     email: Optional[str] = None
-
-
-from uuid import UUID
 
 
 class CustomFoodBase(BaseModel):
@@ -67,7 +65,8 @@ class SportActivityBase(BaseModel):
     activity_name: str
     logged_at: datetime
     duration_minutes: int
-    calories_expended: float
+    carried_weight_kg: Optional[float] = None
+    distance_m: Optional[float] = None
 
 
 class SportActivityCreate(SportActivityBase):
@@ -81,6 +80,7 @@ class SportActivityUpdate(SportActivityBase):
 class SportActivityOut(SportActivityBase):
     id: UUID
     user_id: UUID
+    calories_expended: float | None = None
 
     class Config:
         from_attributes = True
@@ -89,7 +89,7 @@ class SportActivityOut(SportActivityBase):
 class FoodLogBase(BaseModel):
     food_name: str
     quantity: float
-    unit: str
+    unit: Optional[str] = "g"
     logged_at: datetime
     calories: float
     protein: float
@@ -137,3 +137,15 @@ class MetabolismPlotResponse(BaseModel):
 class EnergyBalancePlotResponse(BaseModel):
     calories_unnorm: list[PlotPoint]
     C_exp_t: list[PlotPoint]
+
+
+class FoodOut(BaseModel):
+    id: UUID
+    name: str
+    calories: float
+    protein: Optional[float]
+    carbs: Optional[float]
+    fat: Optional[float]
+
+    class Config:
+        from_attributes = True

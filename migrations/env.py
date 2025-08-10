@@ -61,16 +61,16 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
+    # Ensure the URL used by Alembic comes from our app settings (Neon by default)
+    config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
 
-    # This is the important part
-    # Override the URL with the one from our settings
     with connectable.connect() as connection:
-        config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
         context.configure(connection=connection, target_metadata=target_metadata)
 
         with context.begin_transaction():

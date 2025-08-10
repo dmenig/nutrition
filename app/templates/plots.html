@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Interactive Plots</title>
+    <link rel="stylesheet" href="/static/plots.css" />
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  </head>
+  <body>
+    <div class="toolbar">
+      <select id="plot-selector">
+        <option value="weight">Weight</option>
+        <option value="metabolism">Metabolism</option>
+        <option value="energy">Energy Balance</option>
+      </select>
+      <select id="range-selector">
+        <option value="30">Last 30 days</option>
+        <option value="90">Last 90 days</option>
+        <option value="365">Last 365 days</option>
+        <option value="all">All</option>
+      </select>
+      <button id="refresh-btn">Refresh</button>
+    </div>
+
+    <div id="chart" class="chart"></div>
+
+    <script src="/static/plots.js"></script>
+  </body>
+  </html>
+
+
+

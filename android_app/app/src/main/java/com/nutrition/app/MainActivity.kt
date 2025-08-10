@@ -7,8 +7,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Scaffold
 import androidx.navigation.compose.NavHost
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import android.content.Intent
@@ -16,20 +23,26 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.work.ExistingPeriodicWorkPolicy
 import com.nutrition.app.ui.foodentry.BarcodeScanActivity
 import com.nutrition.app.ui.foodentry.FoodEntryForm
+import com.nutrition.app.ui.foodentry.FoodEntryRoute
 import com.nutrition.app.ui.dailylog.DailyLogScreen
 import com.nutrition.app.ui.sportentry.SportEntryForm
+import com.nutrition.app.ui.sportentry.SportEntryRoute
+import com.nutrition.app.ui.plots.PlotsScreen
 import com.nutrition.app.ui.theme.NutritionTheme
 import com.nutrition.app.ui.customfood.CustomFoodListScreen
 import com.nutrition.app.ui.customfood.CustomFoodEntryScreen
 import java.util.Date
 
 import androidx.work.Constraints
+import android.net.Uri
 import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.nutrition.app.sync.SyncWorker
 import dagger.hilt.android.AndroidEntryPoint
 import java.util.concurrent.TimeUnit
+import com.nutrition.app.util.ErrorReporter
+import kotlinx.coroutines.flow.collectLatest
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -68,15 +81,55 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun NutritionApp() {
     val navController = rememberNavController()
-    NavHost(navController = navController, startDestination = "daily_log") {
+    val snackbarHostState = remember { SnackbarHostState() }
+    LaunchedEffect(Unit) {
+        ErrorReporter.events.collectLatest { message ->
+            snackbarHostState.showSnackbar(message)
+        }
+    }
+
+    Scaffold(
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
+    ) { paddingValues ->
+        NavHost(navController = navController, startDestination = "daily_log") {
         composable("daily_log") {
             DailyLogScreen(
                 onFoodLogClick = { foodLog ->
-                    navController.navigate("food_entry/${foodLog.foodName}/1/g/${Date().time}")
+                    val encodedName = Uri.encode(foodLog.foodName)
+                    val encodedUnit = Uri.encode(foodLog.unit)
+                    navController.navigate("food_entry/$encodedName/${foodLog.quantity}/$encodedUnit/${foodLog.date}")
                 },
                 onSportLogClick = { sportLog ->
-                    navController.navigate("sport_entry/${sportLog.activityName}/${sportLog.durationMinutes}/0")
-                }
+                    navController.navigate("sport_entry_route?activityName=${sportLog.activityName}&duration=${sportLog.durationMinutes}")
+                },
+                onNavigateToFoodEntry = { navController.navigate("food_entry_route") },
+                onNavigateToSportEntry = { navController.navigate("sport_entry_route") },
+                onNavigateToPlots = { navController.navigate("plots") }
+            )
+        }
+        composable("plots") {
+            PlotsScreen()
+        }
+        composable("food_entry_route") {
+            FoodEntryRoute(
+                onSave = { navController.popBackStack() },
+                onCancel = { navController.popBackStack() }
+            )
+        }
+        composable(
+            "sport_entry_route?activityName={activityName}&duration={duration}",
+            arguments = listOf(
+                navArgument("activityName") { type = NavType.StringType; nullable = true },
+                navArgument("duration") { type = NavType.StringType; nullable = true }
+            )
+        ) { backStackEntry ->
+            val activityName = backStackEntry.arguments?.getString("activityName")
+            val duration = backStackEntry.arguments?.getString("duration")
+            SportEntryRoute(
+                activityName = activityName,
+                duration = duration,
+                onSave = { navController.popBackStack() },
+                onCancel = { navController.popBackStack() }
             )
         }
         composable("food_entry/{foodName}/{quantity}/{unit}/{loggedAt}") { backStackEntry ->
@@ -88,22 +141,19 @@ fun NutritionApp() {
             FoodEntryForm(
                 foodName = foodName,
                 quantity = quantity,
-                unit = unit,
                 loggedAt = loggedAt,
-                onSave = { _, _, _, _ -> navController.popBackStack() },
-                onCancel = { navController.popBackStack() },
+                onSave = { _, _, _ -> navController.popBackStack() },
+                onCancel = { navController.popBackStack() }
             )
         }
-        composable("sport_entry/{activityName}/{duration}/{caloriesExpended}") { backStackEntry ->
+        composable("sport_entry/{activityName}/{duration}") { backStackEntry ->
             val activityName = backStackEntry.arguments?.getString("activityName") ?: ""
             val duration = backStackEntry.arguments?.getString("duration") ?: ""
-            val caloriesExpended = backStackEntry.arguments?.getString("caloriesExpended") ?: ""
 
-            SportEntryForm(
+            SportEntryRoute(
                 activityName = activityName,
                 duration = duration,
-                caloriesExpended = caloriesExpended,
-                onSave = { _, _, _ -> navController.popBackStack() },
+                onSave = { navController.popBackStack() },
                 onCancel = { navController.popBackStack() }
             )
         }
@@ -116,6 +166,7 @@ fun NutritionApp() {
             CustomFoodEntryScreen(
                 onBackClick = { navController.popBackStack() }
             )
+        }
         }
     }
 }

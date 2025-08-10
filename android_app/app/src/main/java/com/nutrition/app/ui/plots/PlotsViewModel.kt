@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import android.util.Log
 import com.nutrition.app.data.DateRange as DataDateRange
 
 
@@ -52,19 +53,34 @@ class PlotsViewModel @Inject constructor(
 
     private fun fetchWeightData(dateRange: DateRange) {
         viewModelScope.launch {
-            _weightData.value = plotsRepository.getWeightData(toDataDateRange(dateRange))
+            try {
+                _weightData.value = plotsRepository.getWeightData(toDataDateRange(dateRange))
+            } catch (e: Exception) {
+                Log.e("PlotsViewModel", "Failed to fetch weight data", e)
+                _weightData.value = emptyList()
+            }
         }
     }
 
     private fun fetchMetabolismData(dateRange: DateRange) {
         viewModelScope.launch {
-            _metabolismData.value = plotsRepository.getMetabolismData(toDataDateRange(dateRange))
+            try {
+                _metabolismData.value = plotsRepository.getMetabolismData(toDataDateRange(dateRange))
+            } catch (e: Exception) {
+                Log.e("PlotsViewModel", "Failed to fetch metabolism data", e)
+                _metabolismData.value = emptyList()
+            }
         }
     }
 
     private fun fetchEnergyBalanceData(dateRange: DateRange) {
         viewModelScope.launch {
-            _energyBalanceData.value = plotsRepository.getEnergyBalanceData(toDataDateRange(dateRange))
+            try {
+                _energyBalanceData.value = plotsRepository.getEnergyBalanceData(toDataDateRange(dateRange))
+            } catch (e: Exception) {
+                Log.e("PlotsViewModel", "Failed to fetch energy balance data", e)
+                _energyBalanceData.value = emptyList()
+            }
         }
     }
 }

@@ -1,32 +1,252 @@
-# Nutrition Tracker
+## Nutrition Android App — Quick Context
 
-This is a nutrition tracking application.
+High-level notes to help an LLM (or a developer) locate things fast and build an APK without reading the whole codebase.
 
-## Local Development with Docker Compose
+### Build APK
+- **Prereqs**: Android Studio Giraffe/Koala+ (AGP 8.x), JDK 17, Android SDK 34.
+- **From CLI**:
+  - Debug APK: `./gradlew assembleDebug`
+  - Install on device/emulator: `./gradlew installDebug`
+  - Unsigned release APK: `./gradlew assembleRelease`
+    - To produce a signed release, add a signing config in `android_app/app/build.gradle` and set it on `buildTypes.release`.
+- **From Android Studio**: Open the `android_app/` module directory, then Build > Make Project or Build APK(s).
 
-To set up a local development environment that mirrors the Render production setup, follow these steps:
+Notes:
+- A debug keystore is generated automatically if missing (see `android_app/app/build.gradle` `preBuild` task).
+- Min SDK 24, Target SDK 34. Application ID: `com.nutrition.app`.
 
-### Prerequisites
-*   Docker installed on your machine.
+### Backend/API Base URL
+- Defined in `android_app/app/src/main/java/com/nutrition/app/di/AppModule.kt` inside `provideRetrofit(...)` via `.baseUrl("...")`.
+- Default: `https://nutrition-tbdo.onrender.com/`.
+- For emulator + local backend use: `http://10.0.2.2:<port>/`.
+- Cleartext traffic is allowed in `AndroidManifest.xml` (`android:usesCleartextTraffic="true"`).
 
-### Building and Running the Application
+### Key Entry Points
+- `android_app/app/src/main/AndroidManifest.xml`: app config, permissions (Camera, Internet), `MainActivity` launcher, `NutritionApplication`.
+- `android_app/app/src/main/java/com/nutrition/app/MainActivity.kt`: sets up Compose navigation and enqueues periodic `WorkManager` sync.
+- `android_app/app/src/main/java/com/nutrition/app/NutritionApplication.kt`: Hilt application class (if present in codebase).
 
-1.  **Build the Docker images:**
-    Open your terminal in the project's root directory and run:
+### Dependency Injection (Hilt)
+- `android_app/app/src/main/java/com/nutrition/app/di/`
+  - `AppModule.kt`: Room DB, OkHttp, Retrofit (base URL), repository wiring, `WorkManager`.
+  - `NetworkModule.kt`: Creates `NutritionApi` from the Retrofit instance (named `"NutritionApi"`).
+  - `PlotsModule.kt`: Creates `PlotsApiService` from the same Retrofit instance.
+
+### UI & Navigation (Jetpack Compose)
+- `android_app/app/src/main/java/com/nutrition/app/ui/`
+  - `dailylog/`: `DailyLogScreen` and view model for the home/log view.
+  - `foodentry/`: `FoodEntryRoute`, `FoodEntryForm`, barcode scanning (`BarcodeScanActivity`) with CameraX + ML Kit.
+  - `sportentry/`: sport entry route and form.
+  - `customfood/`: create/view custom foods.
+  - `plots/`: charts (MPAndroidChart) and date range utilities.
+  - `theme/`: colors, typography, theme setup.
+
+### Data Layer & Sync
+- `android_app/app/src/main/java/com/nutrition/app/data/`: repositories, Retrofit service interfaces, and Room entities/DAOs (see DAOs provided in `AppModule`).
+- `android_app/app/src/main/java/com/nutrition/app/sync/SyncWorker.kt`: periodic background sync via `WorkManager` scheduled in `MainActivity`.
+
+### Utilities
+- `android_app/app/src/main/java/com/nutrition/app/util/`: helpers such as `DateConverter`.
+
+### Resources
+- `android_app/app/src/main/res/`: layouts (for Camera preview), drawables (marker bg), strings, themes, and `xml/` for backup/data extraction rules.
+
+### Gradle & Tooling
+- Project settings: `android_app/settings.gradle`, root `android_app/build.gradle` (AGP/Kotlin/Hilt/KSP), module `android_app/app/build.gradle` (Compose, CameraX, ML Kit, Room, WorkManager, Retrofit, MPAndroidChart).
+- Compose is enabled with BOM; Kotlin compiler extension set in `composeOptions`.
+
+### Tests
+- Instrumented UI tests: `android_app/app/src/androidTest/java/com/nutrition/app/ui/...`
+  - Run on device/emulator: `./gradlew connectedDebugAndroidTest`.
+- Unit tests (if present under `test/`): `./gradlew testDebugUnitTest`.
+
+### Common Tasks
+- Update backend URL: edit `AppModule.provideRetrofit` `.baseUrl(...)` and rebuild.
+- Add a new screen: place Composables under `ui/<feature>/` and add a route in `MainActivity` `NavHost`.
+- Add an API: define service interface under `data/remote`, provide it in a DI module using the named Retrofit, inject into a repository/view model.
+
+
+### Populate the Production Database (Neon)
+
+This repo includes scripts and data to fill the production database with food definitions and daily logs parsed from your CSVs.
+
+- Key files:
+  - `data/variables.csv`: food nutrient data per 100g (source of truth for foods)
+  - `data/processed_journal.csv`: journal of daily food formulas and weights
+  - `app/db/populate_db.py`: populates `foods`, `food_logs`, and `sport_activities` tables
+  - `verify_day_vs_db.py`: compares CSV totals vs DB for a given date
+
+- One-time setup (recommended):
+  ```bash
+  python3 -m venv .venv
+  . .venv/bin/activate
+  python -m pip install -r requirements.txt
+  ```
+
+- DB configuration source of truth:
+  - The default `DATABASE_URL` is defined in code in `app/core/config.py` (`Settings.DATABASE_URL`).
+  - Settings are loaded via `pydantic-settings`, which reads `.env` and `.env.local` automatically. Any value set in the environment or these files will override the in-code default.
+  - For docker-compose, `.env` already contains `DATABASE_URL=postgresql://user:password@db:5432/nutrition_db` so containers can talk to the Postgres service at host `db`. If you run Alembic from the host, ensure `DATABASE_URL` points to Neon (not `db`/localhost) to avoid connection errors.
+
+- Prepare CSVs (if you haven’t already processed the Excel journal):
+  ```bash
+  . .venv/bin/activate
+  PYTHONPATH=. python process_nutrition_journal.py
+  # Produces data/processed_journal.csv and data/variables.csv
+  ```
+
+- Populate tables (using the in-code Neon default or your override):
+  ```bash
+  . .venv/bin/activate
+  # .env/.env.local overrides are picked up automatically
+  # Option A (recommended): module execution avoids import issues
+  PYTHONPATH=. python -m app.db.populate_db
+  # Option B: direct script execution
+  PYTHONPATH=. python app/db/populate_db.py
+  ```
+  Notes:
+  - The script first (re)populates `foods` from `data/variables.csv`.
+  - It then parses each `Nourriture` formula in `data/processed_journal.csv` and inserts rows in `food_logs`.
+  - It also parses the `Sport` expressions from the same CSV, evaluates calories using `sport_formulas.py` (with the day’s weight), infers activity name and duration, and inserts rows in `sport_activities`.
+  - Formula parsing supports nested groups and division (e.g. `a*(b+c)/3`). Numeric factors are correctly distributed. All numeric coefficients represent counts of 100g servings (e.g., `15*schweppes_zero` → 1500 g). The Android app treats entered quantities strictly as counts of 100g servings (input “1.5” means 150 g).
+
+  - Sports-only run (re-fill only sports without touching foods/logs):
     ```bash
-    docker-compose build
+    DATABASE_URL='<neon-url>' PYTHONPATH=. python -c "from app.db.populate_db import populate_sport_activities_table, verify_population; populate_sport_activities_table(); verify_population()"
     ```
-    This command will build the Docker image for the FastAPI backend based on the `Dockerfile` in the current directory.
 
-2.  **Run the application:**
-    Start the backend and database services by running:
+- Alternative: populate/verify against the local docker DB (inside the container):
+  ```bash
+  # Start Postgres
+  docker-compose up -d db
+  # Run populate against the compose DB (uses .env DATABASE_URL with host "db")
+  docker-compose run --rm -e PYTHONPATH=/app backend python app/db/populate_db.py
+  # Verify counts inside the container
+  docker-compose run --rm -e PYTHONPATH=/app backend python app/verify_db.py
+  ```
+
+- Verify population (host, using Neon default or your override):
+  ```bash
+  PYTHONPATH=. python app/verify_db.py
+  # Or per-day comparison (example date):
+  PYTHONPATH=. python verify_day_vs_db.py --date 2025-05-03
+  ```
+
+- Troubleshooting:
+  - If you see `Could not parse SQLAlchemy URL`: ensure an effective `DATABASE_URL` is available (in-code default, env var, or `.env(.local)`).
+  - If you see `could not translate host name "db"`: you're running from the host while pointing to the compose DB. Either run the command inside the container (see alternative above) or override `DATABASE_URL` to Neon.
+  - If imports fail (e.g., `ModuleNotFoundError: utils` or `pydantic_settings`), ensure the venv is activated and prefer module execution with an explicit project root on `PYTHONPATH`:
+    - `PYTHONPATH=. python -m app.db.populate_db`
+  - If `data/processed_journal.csv` is missing, run: `PYTHONPATH=. python process_nutrition_journal.py` first.
+  - If a populate command appears to “hang”: it’s usually waiting on a DB host that isn’t reachable (e.g., `db` from docker-compose when running on the host). Quick check:
     ```bash
-    docker-compose up
+    DATABASE_URL='<neon-url>' PYTHONPATH=. python app/verify_db.py
     ```
-    This command will start the PostgreSQL database and the FastAPI backend. The backend will automatically connect to the database using the credentials and URL defined in the `.env` file.
+    If this works, re-run the populate command with `DATABASE_URL` set to Neon or run the populate inside the container so `db` resolves.
+  - If `pip install` fails with an externally-managed environment (PEP 668), create and use a virtualenv (as shown above) instead of system Python.
 
-### Stopping the Application
+### Android Emulator (AVD) setup
 
-To stop the running Docker containers, press `Ctrl+C` in the terminal where `docker-compose up` is running, or run the following command in a new terminal:
-```bash
-docker-compose down
+- **Install SDK tools (one-time)**
+  ```bash
+  export ANDROID_SDK_ROOT=$HOME/Android/Sdk ANDROID_HOME=$ANDROID_SDK_ROOT
+  mkdir -p "$ANDROID_SDK_ROOT"
+  yes | sdkmanager --sdk_root="$ANDROID_SDK_ROOT" \
+    "cmdline-tools;latest" "platform-tools" "emulator" \
+    "platforms;android-34" "build-tools;34.0.0" \
+    "system-images;android-34;default;x86_64"
+  yes | sdkmanager --licenses --sdk_root="$ANDROID_SDK_ROOT"
+  ```
+
+- **Create an AVD (Android 34, x86_64)**
+  ```bash
+  echo no | avdmanager create avd -n nutrition_avd \
+    -k "system-images;android-34;default;x86_64" -c 2048M --force
+  ```
+
+- **Start the emulator** (headless example)
+  ```bash
+  $ANDROID_SDK_ROOT/emulator/emulator -avd nutrition_avd \
+    -no-window -no-boot-anim -gpu swiftshader_indirect -no-snapshot
+  ```
+
+- **Install and launch the app**
+  ```bash
+  cd android_app && ./gradlew installDebug
+  adb shell monkey -p com.nutrition.app -c android.intent.category.LAUNCHER 1
+  ```
+
+- **Useful commands**
+  - List devices: `adb devices`
+  - View logs: `adb -s <emulator-serial> logcat`
+  - Stop emulator: `adb -s <emulator-serial> emu kill`
+
+- **Backend note**
+  - Default base URL is production (set in `android_app/app/src/main/java/com/nutrition/app/di/AppModule.kt`). Actions in the emulator will affect prod data.
+  - To use a local backend from the emulator, set `.baseUrl("http://10.0.2.2:<port>/")` in `AppModule.provideRetrofit` and rebuild.
+
+
+## Backend performance & DB tuning
+
+- Index-friendly day queries:
+  - Replace `DATE(logged_at)` filters with a UTC range: `[day_start, day_end)`. This enables index usage on `logged_at`.
+- Composite indexes (added):
+  - `food_logs(user_id, logged_at)` and `sport_activities(user_id, logged_at)`.
+  - Apply: `. .venv/bin/activate && alembic upgrade head` (uses Neon by default).
+- Verify indexes exist (example via psql):
+  - `\d+ food_logs` and `\d+ sport_activities` should list `ix_*_user_id_logged_at`.
+- SQLAlchemy engine (Neon):
+  - We enable `pool_pre_ping=True` and `pool_recycle=300` in `app/db/database.py` to avoid stale connections.
+- Alembic config notes:
+  - `migrations/env.py` uses `settings.DATABASE_URL`. Ensure it points to Neon when running migrations locally. If you previously had Alembic trying `localhost`/`db`, update `.env` or export `DATABASE_URL` to Neon, then rerun `alembic upgrade head`.
+
+### ADB over TCP/IP via Tailscale (wireless install)
+
+Use this to install/run the Android app on a physical phone over its Tailscale IP, without a USB cable after initial setup.
+
+- **Prerequisites**
+  - Phone has the Tailscale app connected (you should see a `100.x.x.x` address on the device).
+  - Developer options enabled and USB debugging turned on.
+  - `adb` installed on your workstation.
+
+- **Build the APK**
+  - From repo root: `cd android_app && ./gradlew assembleDebug`
+  - APK path: `android_app/app/build/outputs/apk/debug/app-debug.apk`
+
+- **Enable ADB over TCP/IP (one-time per session via USB)**
+  - Verify USB connection: `adb devices` (should list your device as `device`).
+  - Switch to TCP/IP on port 5555: `adb tcpip 5555`
+
+- **Find the phone’s Tailscale IP**
+  - Easiest via ADB: `adb shell ip -o addr show | grep -E '100\\.'`
+    - On many devices, Tailscale shows on `tun0` with an address like `100.115.x.y/32`.
+  - Alternatives:
+    - On the phone, open the Tailscale app and copy the `100.x.x.x` address.
+    - If you have a shell on device: `adb shell ip -o addr show dev tun0`.
+
+- **Connect over Tailscale**
+  - `adb connect <TAILSCALE_IP>:5555`
+  - Verify: `adb devices` should show `<TAILSCALE_IP>:5555    device` (USB entry may still appear until unplugged).
+
+- **Install the APK over the network**
+  - `adb -s <TAILSCALE_IP>:5555 install -r -d android_app/app/build/outputs/apk/debug/app-debug.apk`
+    - `-r`: reinstall if present
+    - `-d`: allow versionCode downgrade (useful for debug builds)
+    - Optional: `-g` to auto-grant runtime permissions on install
+
+- **Launch the app**
+  - `adb -s <TAILSCALE_IP>:5555 shell am start -n com.nutrition.app/.MainActivity`
+
+- **Disconnect (optional)**
+  - `adb disconnect <TAILSCALE_IP>:5555`
+  - To stop TCP/IP mode (revert to USB): reconnect via USB, then `adb usb`
+
+- **Troubleshooting**
+  - If install seems to hang:
+    - Reset ADB: `adb disconnect && adb kill-server && adb start-server` then `adb connect <TAILSCALE_IP>:5555` and retry.
+    - Try pushing then installing via package manager:
+      - `adb -s <IP:PORT> push android_app/app/build/outputs/apk/debug/app-debug.apk /data/local/tmp/app-debug.apk`
+      - `adb -s <IP:PORT> shell pm install -r -d /data/local/tmp/app-debug.apk`
+    - Ensure the phone is reachable on `<TAILSCALE_IP>:5555` (Tailscale is connected and not asleep). Re-run `adb tcpip 5555` over USB if needed.
+    - On Android 12+ using Wireless debugging UI instead of `tcpip`, you may need pairing: `adb pair <IP:PAIRING_PORT>` and enter the pairing code from the phone; then `adb connect <IP:PORT>`.
+  - Security note: disconnect or switch back to USB when finished to avoid leaving ADB exposed.
