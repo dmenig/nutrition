@@ -177,8 +177,8 @@ fun DailyLogScreen(
 
 // Extension function for Date formatting (will be replaced by a proper formatter)
 fun Date.toFormattedString(): String {
-    // Use a stable, locale-aware formatter with 4-digit year
-    return SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(this)
+    // Use locale-aware date with day name and 4-digit year
+    return SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(this)
 }
 
 @Composable

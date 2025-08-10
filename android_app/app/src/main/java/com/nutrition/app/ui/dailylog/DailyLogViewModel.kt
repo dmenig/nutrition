@@ -94,29 +94,32 @@ class DailyLogViewModel @Inject constructor(
         viewModelScope.launch {
             repository.getActivitiesForDay(startOfDay, endOfDay).collect { sportActivities ->
                 _sportLogs.value = sportActivities
-                // Always refresh from server for the selected date to ensure correctness
-                // Replace local cache with server truth to avoid stale/incorrect entries
-                try {
-                    val localDate = date.toInstant().atZone(ZoneId.systemDefault()).toLocalDate()
-                    val remoteSports = remoteRepository.fetchSportActivitiesForDate(localDate).getOrNull()
-                    if (!remoteSports.isNullOrEmpty()) {
-                        repository.deleteActivitiesForDay(startOfDay, endOfDay)
-                        remoteSports.forEach { rs: SportActivityResponse ->
-                            val epochMillis = toEpochMillisUtc(rs.loggedAt)
-                            repository.insertSportActivity(
-                                com.nutrition.app.data.local.entities.SportActivity(
-                                    activityName = rs.activityName,
-                                    durationMinutes = rs.durationMinutes,
-                                    carriedWeightKg = rs.carriedWeightKg?.toDouble(),
-                                    distanceM = rs.distanceM?.toDouble(),
-                                    caloriesBurned = rs.caloriesExpended.toDouble(),
-                                    date = epochMillis,
-                                    synced = true
+                if (sportActivities.isEmpty()) {
+                    // Fallback: fetch remote sports for the date and insert locally
+                    try {
+                        val localDate = date.toInstant().atZone(ZoneId.systemDefault()).toLocalDate()
+                        val remoteSports = remoteRepository.fetchSportActivitiesForDate(localDate).getOrNull()
+                        if (!remoteSports.isNullOrEmpty()) {
+                            // Replace local day's activities with server truth to avoid duplicates or drifts
+                            repository.deleteActivitiesForDay(startOfDay, endOfDay)
+                            remoteSports.forEach { rs: SportActivityResponse ->
+                                // Remote timestamps are UTC; convert accordingly to avoid TZ shifts
+                                val epochMillis = toEpochMillisUtc(rs.loggedAt)
+                                repository.insertSportActivity(
+                                    com.nutrition.app.data.local.entities.SportActivity(
+                                        activityName = rs.activityName,
+                                        durationMinutes = rs.durationMinutes,
+                                        carriedWeightKg = rs.carriedWeightKg?.toDouble(),
+                                        distanceM = rs.distanceM?.toDouble(),
+                                        caloriesBurned = rs.caloriesExpended.toDouble(),
+                                        date = epochMillis,
+                                        synced = true
+                                    )
                                 )
-                            )
+                            }
                         }
-                    }
-                } catch (_: Exception) { /* ignore demo fetch errors */ }
+                    } catch (_: Exception) { /* ignore demo fetch errors */ }
+                }
             }
         }
 
