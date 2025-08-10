@@ -249,10 +249,9 @@ def populate_food_log_table():
                     },
                 )
 
-                # Interpret all parsed coefficients as counts of 100g servings.
-                # This ensures expressions like "15*schweppes_zero" map to 1500g,
-                # and decimals like "1,358*(...)/4" keep full precision per item.
-                quantity_in_grams = float(quantity) * 100.0
+                # Interpret parsed coefficients as grams.
+                # Nutrient data in variables.csv is per 100g, so we will scale by (grams/100) below.
+                quantity_in_grams = float(quantity)
 
                 # The nutritional values in the CSV are per 100g.
                 # Scale by (grams / 100) to compute actual amounts.
