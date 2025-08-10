@@ -65,6 +65,17 @@ Notes:
 - Add a new screen: place Composables under `ui/<feature>/` and add a route in `MainActivity` `NavHost`.
 - Add an API: define service interface under `data/remote`, provide it in a DI module using the named Retrofit, inject into a repository/view model.
 
+### Deploy (Render)
+
+- Pushes to `main` trigger an automatic rebuild/redeploy of the backend on Render.
+- Service URL: `https://nutrition-tbdo.onrender.com/` (health: `/api/v1/health`).
+- Verify plots after deploy:
+  - `curl -sS https://nutrition-tbdo.onrender.com/api/v1/plots/weight | jq '.W_obs | length'`
+  - `curl -sS https://nutrition-tbdo.onrender.com/api/v1/plots/metabolism | jq '.M_base | length'`
+  - `curl -sS https://nutrition-tbdo.onrender.com/api/v1/plots/energy-balance | jq '.calories_unnorm | length'`
+- If plots return 0 points, the backend includes a fallback to synthesize series from `data/features.csv`. You can also trigger a rebuild endpoint:
+  - `curl -X POST https://nutrition-tbdo.onrender.com/api/v1/plots/rebuild`
+
 
 ### Populate the Production Database (Neon)
 
