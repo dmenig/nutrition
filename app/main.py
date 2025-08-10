@@ -270,7 +270,7 @@ app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
 
 
 def get_plot_data():
-    # Load results if available; otherwise, construct a minimal but non-empty frame
+    # Prefer real model outputs and features when available; otherwise, fallback to DB summaries
     results_path = "data/final_results.csv"
     expected_cols = [
         "W_obs",
@@ -283,7 +283,27 @@ def get_plot_data():
     def _load_results_csv() -> pd.DataFrame:
         if os.path.exists(results_path):
             try:
-                return pd.read_csv(results_path)
+                df = pd.read_csv(results_path)
+                # Normalize date column if present
+                if "Date" in df.columns and "date" not in df.columns:
+                    df = df.rename(columns={"Date": "date"})
+                # If results lack a date column, try to attach it from features.csv
+                if "date" not in df.columns:
+                    try:
+                        f_path = "data/features.csv"
+                        if os.path.exists(f_path):
+                            f = pd.read_csv(f_path)
+                            if "Date" in f.columns and "date" not in f.columns:
+                                f = f.rename(columns={"Date": "date"})
+                            if "date" in f.columns and len(f["date"]) >= len(df):
+                                df.insert(0, "date", f["date"].iloc[: len(df)].values)
+                    except Exception:
+                        pass
+                # Keep only expected
+                for col in expected_cols:
+                    if col not in df.columns:
+                        df[col] = pd.Series(dtype=float)
+                return df
             except Exception:
                 return pd.DataFrame(columns=expected_cols)
         return pd.DataFrame(columns=expected_cols)
@@ -291,32 +311,27 @@ def get_plot_data():
     def _build_from_daily_summaries() -> pd.DataFrame:
         db = SessionLocal()
         try:
-            # Prefer a dummy public user if present
-            dummy = db.query(User).filter(User.email == "dummy@example.com").first()
-            q = db.query(DailySummary).order_by(DailySummary.date.asc())
-            # If a dummy user exists, try it first; fallback to unscoped if no rows
-            rows = []
-            if dummy is not None:
-                rows = q.filter(DailySummary.user_id == dummy.id).all()
-            if not rows:
-                rows = q.all()
+            # Unscoped: aggregate across all users by date for public plots
+            rows = db.query(DailySummary).order_by(DailySummary.date.asc()).all()
             if not rows:
                 return pd.DataFrame(columns=expected_cols)
-            df = pd.DataFrame(
-                [
-                    {
-                        "date": r.date,
-                        "calories": r.calories_total or 0.0,
-                        "sport": r.sport_calories_total or 0.0,
-                        "M_base": 2500.0,
-                    }
-                    for r in rows
-                ]
-            )
-            # Fill required columns
+            df = pd.DataFrame([
+                {
+                    "date": r.date,
+                    "calories": r.calories_total or 0.0,
+                    "sport": r.sport_calories_total or 0.0,
+                }
+                for r in rows
+            ])
+            # Sum across users per date
+            df = df.groupby("date", as_index=False).sum(numeric_only=True)
+            # Add a reasonable constant metabolism placeholder
+            df["M_base"] = 2500.0
+            # Fill required columns (leave weights empty if unknown)
             df["W_obs"] = pd.Series(dtype=float)
             df["W_adj_pred"] = pd.Series(dtype=float)
-            return df[expected_cols]
+            # Keep date for downstream time_index construction
+            return df[["date", *expected_cols]]
         finally:
             db.close()
 
@@ -352,6 +367,7 @@ def get_plot_data():
                 )
                 records.append(
                     {
+                        "date": d,
                         "calories": float(cal or 0.0),
                         "sport": float(sport_total or 0.0),
                         "M_base": 2500.0,
@@ -360,16 +376,13 @@ def get_plot_data():
             df = pd.DataFrame(records)
             df["W_obs"] = pd.Series(dtype=float)
             df["W_adj_pred"] = pd.Series(dtype=float)
-            return df[expected_cols]
+            return df[["date", *expected_cols]]
         finally:
             db.close()
 
-    def _fallback_build_from_features() -> pd.DataFrame:
-        """Fallback: try to create a simple dataset from features or raw processed journal.
-
-        Returns a DataFrame with columns in expected_cols (plus time_index to be added later).
-        """
-        # Try features.csv first
+    def _build_from_features_with_model() -> pd.DataFrame:
+        """Use features and the loaded model to compute weight and metabolism series."""
+        # Load or generate features
         features_path = "data/features.csv"
         features_df = None
         if os.path.exists(features_path):
@@ -377,98 +390,85 @@ def get_plot_data():
                 features_df = pd.read_csv(features_path)
             except Exception:
                 features_df = None
-
-        # If not available, attempt to generate via build_features
         if features_df is None:
             try:
                 from build_features import main as build_features_main
-
                 features_df = build_features_main(
                     journal_path="data/processed_journal.csv",
                     variables_path="data/variables.csv",
                 )
             except Exception:
                 features_df = None
-
-        # If still missing, return empty frame with expected columns
         if features_df is None or features_df.empty:
             return pd.DataFrame(columns=expected_cols)
 
-        # Ensure lowercase/normalized columns (build_features already normalizes names)
-        col = lambda name: name if name in features_df.columns else name.lower()
+        # Normalize column names and pick inputs
+        if "Date" in features_df.columns and "date" not in features_df.columns:
+            features_df = features_df.rename(columns={"Date": "date"})
+        # Ensure numeric
+        for col_name in ["calories", "carbs", "sugar", "sel", "alcool", "water", "sport", "pds"]:
+            if col_name in features_df.columns:
+                features_df[col_name] = pd.to_numeric(features_df[col_name], errors="coerce").fillna(0)
 
-        # Compose minimal frame
-        out = pd.DataFrame()
-        # Observed weight
-        if "pds" in features_df.columns:
-            out["W_obs"] = pd.to_numeric(features_df["pds"], errors="coerce").fillna(0)
-        elif "Pds" in features_df.columns:
-            out["W_obs"] = pd.to_numeric(features_df["Pds"], errors="coerce").fillna(0)
-        else:
-            out["W_obs"] = pd.Series(dtype=float)
-
-        # Simple smoothed adjusted weight (7-day rolling mean as a proxy)
-        if not out["W_obs"].empty:
-            out["W_adj_pred"] = (
-                out["W_obs"].rolling(window=7, min_periods=1).mean().astype(float)
-            )
-        else:
-            out["W_adj_pred"] = pd.Series(dtype=float)
-
-        # Metabolism: use a reasonable constant if unknown
-        # If a precomputed metabolism exists in features, prefer it
-        if "M_base" in features_df.columns:
-            out["M_base"] = pd.to_numeric(features_df["M_base"], errors="coerce").fillna(0)
-        else:
+        # Get model outputs
+        try:
+            outputs = prediction_service.predict_from_features(features_df)
+            out = pd.DataFrame({
+                "W_obs": outputs.get("actual_weight", []),
+                "W_adj_pred": outputs.get("predicted_adjusted_weight", []),
+                "M_base": outputs.get("base_metabolism_kcal", []),
+                "calories": features_df.get("calories", 0),
+                "sport": features_df.get("sport", 0),
+            })
+        except Exception:
+            # As a fallback, construct minimal series without model
+            out = pd.DataFrame()
+            out["W_obs"] = pd.to_numeric(features_df.get("pds", 0), errors="coerce")
+            if out["W_obs"].notna().any():
+                out["W_adj_pred"] = out["W_obs"].rolling(window=7, min_periods=1).mean().astype(float)
+            else:
+                out["W_adj_pred"] = pd.Series(dtype=float)
             out["M_base"] = 2500.0
+            out["calories"] = pd.to_numeric(features_df.get("calories", 0), errors="coerce").fillna(0)
+            out["sport"] = pd.to_numeric(features_df.get("sport", 0), errors="coerce").fillna(0)
 
-        # Calories and sport (unnormalized proxies)
-        if "calories" in features_df.columns:
-            out["calories"] = pd.to_numeric(features_df["calories"], errors="coerce").fillna(0)
-        elif "Calories / 100g" in features_df.columns:
-            out["calories"] = pd.to_numeric(
-                features_df["Calories / 100g"], errors="coerce"
-            ).fillna(0)
+        # Attach date if available
+        if "date" in features_df.columns:
+            out.insert(0, "date", features_df["date"])  # ensure first column is date
+        if "date" in out.columns:
+            return out[["date", *expected_cols]]
         else:
-            out["calories"] = 0.0
+            return out[expected_cols]
 
-        if "sport" in features_df.columns:
-            out["sport"] = pd.to_numeric(features_df["sport"], errors="coerce").fillna(0)
-        else:
-            out["sport"] = 0.0
-
-        return out[expected_cols]
-
-    # Prefer DB-built summaries; if empty, try direct DB aggregation
-    df = _build_from_daily_summaries()
+    # Priority: results CSV -> features+model -> DB summaries -> direct DB agg
+    df = _load_results_csv()
+    if df.empty:
+        df = _build_from_features_with_model()
+    if df.empty:
+        df = _build_from_daily_summaries()
     if df.empty:
         df = _build_from_db_on_the_fly()
 
-    # If empty, fallback to features-derived construction
-    if df.empty:
-        df = _fallback_build_from_features()
-
-    # As a last resort, synthesize a small non-empty dataset so plots render
-    if df.empty:
-        n_days = 30
-        synthetic = pd.DataFrame()
-        synthetic["W_obs"] = pd.Series([70.0 + (i % 5) * 0.1 for i in range(n_days)], dtype=float)
-        synthetic["W_adj_pred"] = (
-            synthetic["W_obs"].rolling(window=7, min_periods=1).mean().astype(float)
-        )
-        synthetic["M_base"] = 2500.0
-        synthetic["calories"] = 2200.0
-        synthetic["sport"] = 300.0
-        df = synthetic
-
-    # Ensure expected columns exist and are numeric
+    # Ensure expected columns exist
     for col_name in expected_cols:
         if col_name not in df.columns:
-            df[col_name] = []
+            df[col_name] = pd.Series(dtype=float)
+    # Coerce numeric types. Do NOT fill missing weights with zeros; keep NaN to signal "unknown".
+    for col_name in ["calories", "sport", "M_base"]:
         df[col_name] = pd.to_numeric(df[col_name], errors="coerce").fillna(0)
+    for col_name in ["W_obs", "W_adj_pred"]:
+        df[col_name] = pd.to_numeric(df[col_name], errors="coerce")
 
-    # Create a simple time index
-    df["time_index"] = range(len(df))
+    # Build time_index from date if available; otherwise fall back to sequential index
+    if "date" in df.columns:
+        try:
+            dt = pd.to_datetime(df["date"], errors="coerce")
+            # Convert to epoch milliseconds
+            df["time_index"] = (dt.astype("int64") // 1_000_000)
+        except Exception:
+            df["time_index"] = range(len(df))
+    else:
+        df["time_index"] = range(len(df))
 
     # Try to load normalization parameters; if missing, use identity transform
     calories_mean = 0.0
@@ -541,16 +541,18 @@ def plots_debug():
 @app.get("/api/v1/plots/weight", response_model=WeightPlotResponse, tags=["plots"])
 def get_weight_plot_data():
     df = get_plot_data()
-    return WeightPlotResponse(
-        W_obs=[
-            {"time_index": row["time_index"], "value": row["W_obs"]}
-            for index, row in df.iterrows()
-        ],
-        W_adj_pred=[
-            {"time_index": row["time_index"], "value": row["W_adj_pred"]}
-            for index, row in df.iterrows()
-        ],
-    )
+    # Only include points with meaningful weights (> 0). If none, return empty to allow client fallback.
+    w_obs = [
+        {"time_index": row["time_index"], "value": float(row["W_obs"])}
+        for _, row in df.iterrows()
+        if pd.notnull(row.get("W_obs")) and float(row["W_obs"]) > 0.0
+    ]
+    w_adj = [
+        {"time_index": row["time_index"], "value": float(row["W_adj_pred"])}
+        for _, row in df.iterrows()
+        if pd.notnull(row.get("W_adj_pred")) and float(row["W_adj_pred"]) > 0.0
+    ]
+    return WeightPlotResponse(W_obs=w_obs, W_adj_pred=w_adj)
 
 
 @app.get(
@@ -558,12 +560,16 @@ def get_weight_plot_data():
 )
 def get_metabolism_plot_data():
     df = get_plot_data()
-    return MetabolismPlotResponse(
-        M_base=[
-            {"time_index": row["time_index"], "value": row["M_base"]}
-            for index, row in df.iterrows()
+    m_values = [float(v) for v in df["M_base"].tolist() if pd.notnull(v)]
+    # If metabolism is a flat placeholder at 2500 across all points, return empty to allow client fallback
+    m_series: list[dict] = []
+    if not (len(m_values) > 0 and all(abs(v - 2500.0) < 1e-6 for v in m_values)):
+        m_series = [
+            {"time_index": row["time_index"], "value": float(row["M_base"])}
+            for _, row in df.iterrows()
+            if pd.notnull(row.get("M_base"))
         ]
-    )
+    return MetabolismPlotResponse(M_base=m_series)
 
 
 @app.get(
