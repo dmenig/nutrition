@@ -2,7 +2,8 @@ from fastapi import FastAPI, Depends, HTTPException, status, Request
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
-from app.db.database import engine, Base, get_db
+from app.db.database import engine, Base, get_db, SessionLocal
+from app.db.models import DailySummary, FoodLog, SportActivity, User
 from app.routers import (
     auth,
     custom_foods,
@@ -26,6 +27,8 @@ import torch
 from train_model import FinalModel, reconstruct_trajectory  # Import the model and trajectory util
 import json  # Added import for json
 import pathlib
+from sqlalchemy import func
+from datetime import datetime, timezone, timedelta
 
 Base.metadata.create_all(bind=engine)
 
@@ -284,6 +287,35 @@ def get_plot_data():
                 return pd.DataFrame(columns=expected_cols)
         return pd.DataFrame(columns=expected_cols)
 
+    def _build_from_daily_summaries() -> pd.DataFrame:
+        db = SessionLocal()
+        try:
+            # Prefer a dummy public user if present
+            dummy = db.query(User).filter(User.email == "dummy@example.com").first()
+            q = db.query(DailySummary).order_by(DailySummary.date.asc())
+            if dummy is not None:
+                q = q.filter(DailySummary.user_id == dummy.id)
+            rows = q.all()
+            if not rows:
+                return pd.DataFrame(columns=expected_cols)
+            df = pd.DataFrame(
+                [
+                    {
+                        "date": r.date,
+                        "calories": r.calories_total or 0.0,
+                        "sport": r.sport_calories_total or 0.0,
+                        "M_base": 2500.0,
+                    }
+                    for r in rows
+                ]
+            )
+            # Fill required columns
+            df["W_obs"] = pd.Series(dtype=float)
+            df["W_adj_pred"] = pd.Series(dtype=float)
+            return df[expected_cols]
+        finally:
+            db.close()
+
     def _fallback_build_from_features() -> pd.DataFrame:
         """Fallback: try to create a simple dataset from features or raw processed journal.
 
@@ -359,7 +391,8 @@ def get_plot_data():
 
         return out[expected_cols]
 
-    df = _load_results_csv()
+    # Prefer DB-built summaries
+    df = _build_from_daily_summaries()
 
     # If empty, fallback to features-derived construction
     if df.empty:
@@ -416,6 +449,55 @@ def get_plot_data():
     df["sport_unnorm"] = df["sport"] * sport_std + sport_mean
     df["C_exp_t"] = df["M_base"].fillna(0) + df["sport_unnorm"]
     return df
+
+
+def upsert_daily_summary(db: Session, target_date: datetime, user_id: uuid.UUID | None = None) -> None:
+    day_start = datetime(target_date.year, target_date.month, target_date.day, tzinfo=timezone.utc)
+    day_end = day_start + timedelta(days=1)
+
+    # Aggregate foods for the day
+    food_q = db.query(
+        func.coalesce(func.sum(FoodLog.calories), 0.0),
+        func.coalesce(func.sum(FoodLog.protein), 0.0),
+        func.coalesce(func.sum(FoodLog.carbs), 0.0),
+        func.coalesce(func.sum(FoodLog.fat), 0.0),
+    ).filter(FoodLog.logged_at >= day_start, FoodLog.logged_at < day_end)
+    if user_id:
+        food_q = food_q.filter(FoodLog.user_id == user_id)
+    calories, protein, carbs, fat = food_q.first()
+
+    # Aggregate sport calories for the day
+    sport_q = db.query(func.coalesce(func.sum(SportActivity.calories_expended), 0.0)).filter(
+        SportActivity.logged_at >= day_start, SportActivity.logged_at < day_end
+    )
+    if user_id:
+        sport_q = sport_q.filter(SportActivity.user_id == user_id)
+    sport_total = sport_q.scalar() or 0.0
+
+    # Upsert summary
+    summary = (
+        db.query(DailySummary)
+        .filter(DailySummary.date == day_start.date(), DailySummary.user_id == user_id)
+        .first()
+    )
+    if summary is None:
+        summary = DailySummary(
+            user_id=user_id,
+            date=day_start.date(),
+            calories_total=calories,
+            protein_g_total=protein,
+            carbs_g_total=carbs,
+            fat_g_total=fat,
+            sport_calories_total=sport_total,
+        )
+        db.add(summary)
+    else:
+        summary.calories_total = calories
+        summary.protein_g_total = protein
+        summary.carbs_g_total = carbs
+        summary.fat_g_total = fat
+        summary.sport_calories_total = sport_total
+    db.commit()
 
 
 @app.get("/api/v1/plots/debug", tags=["plots"])

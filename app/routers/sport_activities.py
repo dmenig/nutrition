@@ -10,6 +10,7 @@ from app.db.models import SportActivity, User
 from app.db.database import get_db
 from app.core.auth import get_current_user
 from sport_formulas import MET_VALUES, evaluate_sport_formula
+from app.main import upsert_daily_summary
 
 router = APIRouter()
 
@@ -53,6 +54,8 @@ def create_sport_activity(
     db.add(db_sport_activity)
     db.commit()
     db.refresh(db_sport_activity)
+    # Update daily summary for the day
+    upsert_daily_summary(db, db_sport_activity.logged_at, current_user.id)
     return db_sport_activity
 
 
@@ -106,8 +109,10 @@ def delete_sport_activity(
             status_code=status.HTTP_404_NOT_FOUND, detail="Sport activity not found."
         )
 
+    day = db_sport_activity.logged_at
     db.delete(db_sport_activity)
     db.commit()
+    upsert_daily_summary(db, day, current_user.id)
     return
 
 

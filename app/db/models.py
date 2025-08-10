@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, Float, Integer, ForeignKey, TIMESTAMP
+from sqlalchemy import Column, String, Float, Integer, ForeignKey, TIMESTAMP, Date, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -69,3 +69,21 @@ class Food(Base):
     protein = Column(Float)
     carbs = Column(Float)
     fat = Column(Float)
+
+
+class DailySummary(Base):
+    __tablename__ = "daily_summaries"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    date = Column(Date, nullable=False, index=True)
+    calories_total = Column(Float, nullable=False, default=0.0)
+    protein_g_total = Column(Float, nullable=False, default=0.0)
+    carbs_g_total = Column(Float, nullable=False, default=0.0)
+    fat_g_total = Column(Float, nullable=False, default=0.0)
+    sport_calories_total = Column(Float, nullable=False, default=0.0)
+
+    user = relationship("User")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "date", name="uq_daily_summaries_user_date"),
+    )
