@@ -5,6 +5,7 @@ import androidx.room.Room
 import com.nutrition.app.data.local.database.NutritionDatabase
 import com.nutrition.app.data.local.database.MIGRATION_1_2
 import com.nutrition.app.data.local.database.MIGRATION_2_3
+import com.nutrition.app.data.local.database.MIGRATION_3_4
 import com.nutrition.app.data.remote.NutritionApi
 import com.nutrition.app.data.remote.NutritionApiService
 import com.nutrition.app.data.repository.NutritionRepository
