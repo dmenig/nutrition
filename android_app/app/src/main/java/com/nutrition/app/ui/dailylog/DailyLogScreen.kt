@@ -140,6 +140,14 @@ fun DailyLogScreen(
                                 Column(modifier = Modifier.padding(16.dp)) {
                                     Text(text = log.activityName, style = MaterialTheme.typography.bodyLarge)
                                     Text(text = "${log.durationMinutes} min", style = MaterialTheme.typography.bodySmall)
+                                    val distance = log.distanceM
+                                    val extraWeight = log.carriedWeightKg
+                                    if (distance != null) {
+                                        Text(text = "Distance: ${"%.0f".format(distance)} m", style = MaterialTheme.typography.bodySmall)
+                                    }
+                                    if (extraWeight != null) {
+                                        Text(text = "Carried: ${"%.1f".format(extraWeight)} kg", style = MaterialTheme.typography.bodySmall)
+                                    }
                                 }
                             }
                         }

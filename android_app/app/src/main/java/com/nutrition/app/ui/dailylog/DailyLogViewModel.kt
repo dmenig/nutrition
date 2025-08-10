@@ -109,6 +109,8 @@ class DailyLogViewModel @Inject constructor(
                                     com.nutrition.app.data.local.entities.SportActivity(
                                         activityName = rs.activityName,
                                         durationMinutes = rs.durationMinutes,
+                                        carriedWeightKg = rs.carriedWeightKg?.toDouble(),
+                                        distanceM = rs.distanceM?.toDouble(),
                                         caloriesBurned = rs.caloriesExpended.toDouble(),
                                         date = epochMillis,
                                         synced = true

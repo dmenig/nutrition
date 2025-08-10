@@ -55,6 +55,8 @@ class SportEntryViewModel @Inject constructor(
                 SportActivity(
                     activityName = activityName,
                     durationMinutes = durationMinutes,
+                    carriedWeightKg = carriedWeightKg?.toDouble(),
+                    distanceM = distanceM?.toDouble(),
                     caloriesBurned = 0.0,
                     date = localEpochMillis
                 )
