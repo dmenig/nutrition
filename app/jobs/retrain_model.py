@@ -36,8 +36,8 @@ def retrain_model_job():
         if "_sa_instance_state" in sport_data_df.columns:
             sport_data_df = sport_data_df.drop(columns=["_sa_instance_state"])
 
-        # Define save paths
-        model_path = os.path.join(MODEL_DIR, "model.pkl")
+        # Define save paths (align with app expectations)
+        model_path = os.path.join(MODEL_DIR, "recurrent_model.pth")
         params_path = os.path.join(MODEL_DIR, "best_params.json")
 
         # Run the training logic
