@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.db.models import FoodLog, SportActivity, User
 from datetime import datetime, timezone
-from app.main import upsert_daily_summary
+from app.services.summary import upsert_daily_summary, backfill_all_summaries
 from sqlalchemy import func
 
 router = APIRouter()
@@ -47,10 +47,5 @@ def backfill_daily_summaries(api_key: str = Depends(get_api_key), db: Session = 
     sport_dates = db.query(func.date(SportActivity.logged_at)).distinct().all()
     dates = {d[0] for d in food_dates} | {d[0] for d in sport_dates}
 
-    count = 0
-    for d in sorted(dates):
-        # Use UTC midnight for target date
-        target = datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
-        upsert_daily_summary(db, target, user_id)
-        count += 1
-    return {"updated_days": count}
+    updated = backfill_all_summaries(db, user_id)
+    return {"updated_days": updated}
