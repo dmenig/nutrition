@@ -349,7 +349,7 @@ def get_plot_data():
                     .filter(SportActivity.logged_date == d)
                     .scalar()
                     or 0.0
-                }
+                )
                 records.append(
                     {
                         "calories": float(cal or 0.0),
