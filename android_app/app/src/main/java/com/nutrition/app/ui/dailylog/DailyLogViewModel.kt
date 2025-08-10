@@ -11,8 +11,12 @@ import com.nutrition.app.data.repository.NutritionRepository
 import com.nutrition.app.util.atEndOfDay
 import com.nutrition.app.util.atStartOfDay
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.Date
 import javax.inject.Inject
@@ -21,6 +25,7 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneOffset
 
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class DailyLogViewModel @Inject constructor(
     private val repository: NutritionRepository,
@@ -40,38 +45,35 @@ class DailyLogViewModel @Inject constructor(
     val sportLogs: StateFlow<List<SportActivity>> = _sportLogs
 
     init {
-        loadDailyData(selectedDate.value)
-    }
-
-    fun selectDate(date: Date) {
-        _selectedDate.value = date
-        loadDailyData(date)
-    }
-
-    private fun loadDailyData(date: Date) {
-        val startOfDay = date.time.atStartOfDay()
-        val endOfDay = date.time.atEndOfDay()
-
+        // Daily summary flow tied to selected date
         viewModelScope.launch {
-            repository.getDailySummary(startOfDay, endOfDay).collect { summary ->
-                _dailySummary.value = summary
-            }
+            _selectedDate
+                .flatMapLatest { date ->
+                    val start = date.time.atStartOfDay()
+                    val end = date.time.atEndOfDay()
+                    repository.getDailySummary(start, end)
+                }
+                .collect { summary -> _dailySummary.value = summary }
         }
 
+        // Food logs flow tied to selected date; when empty, fetch from remote in bulk
         viewModelScope.launch {
-            repository.getLogsForDay(startOfDay, endOfDay).collect { foodLogs ->
-                _foodLogs.value = foodLogs
-                if (foodLogs.isEmpty()) {
-                    // Fallback: fetch sample/public logs for demo if local is empty
-                    try {
-                        val localDate = date.toInstant().atZone(ZoneId.systemDefault()).toLocalDate()
-                        val remoteLogs = remoteRepository.fetchFoodLogsForDate(localDate).getOrNull()
-                        if (!remoteLogs.isNullOrEmpty()) {
-                            remoteLogs.forEach { rl: FoodLogResponse ->
-                                // Remote timestamps are UTC; convert accordingly to avoid TZ shifts
-                                val epochMillis = toEpochMillisUtc(rl.loggedAt)
-                                // Trust server values as-is; no rescaling heuristics.
-                                repository.insertFoodLog(
+            _selectedDate
+                .flatMapLatest { date ->
+                    val start = date.time.atStartOfDay()
+                    val end = date.time.atEndOfDay()
+                    repository.getLogsForDay(start, end)
+                }
+                .collect { foodLogs ->
+                    _foodLogs.value = foodLogs
+                    if (foodLogs.isEmpty()) {
+                        try {
+                            val date = selectedDate.value
+                            val localDate = date.toInstant().atZone(ZoneId.systemDefault()).toLocalDate()
+                            val remoteLogs = remoteRepository.fetchFoodLogsForDate(localDate).getOrNull()
+                            if (!remoteLogs.isNullOrEmpty()) {
+                                val toInsert = remoteLogs.map { rl: FoodLogResponse ->
+                                    val epochMillis = toEpochMillisUtc(rl.loggedAt)
                                     FoodLog(
                                         foodName = rl.foodName,
                                         quantity = rl.quantity.toDouble(),
@@ -83,33 +85,41 @@ class DailyLogViewModel @Inject constructor(
                                         date = epochMillis,
                                         synced = true
                                     )
-                                )
+                                }
+                                repository.insertFoodLogs(toInsert)
                             }
-                        }
-                    } catch (_: Exception) { /* ignore demo fetch errors */ }
+                        } catch (_: Exception) { }
+                    }
                 }
-            }
         }
 
+        // Sport logs flow tied to selected date; refresh from remote in bulk when needed
         viewModelScope.launch {
-            repository.getActivitiesForDay(startOfDay, endOfDay).collect { sportActivities ->
-                _sportLogs.value = sportActivities
+            _selectedDate
+                .flatMapLatest { date ->
+                    val start = date.time.atStartOfDay()
+                    val end = date.time.atEndOfDay()
+                    repository.getActivitiesForDay(start, end)
+                }
+                .collect { sportActivities ->
+                    _sportLogs.value = sportActivities
 
-                val shouldRefreshFromRemote = sportActivities.isEmpty() ||
-                    sportActivities.any { sa ->
-                        val needsDistanceOrWeight = sa.activityName in listOf("Walking", "Running", "Cycling")
-                        needsDistanceOrWeight && (sa.distanceM == null || sa.carriedWeightKg == null)
-                    }
+                    val shouldRefreshFromRemote = sportActivities.isEmpty() ||
+                        sportActivities.any { sa ->
+                            val needsDistanceOrWeight = sa.activityName in listOf("Walking", "Running", "Cycling")
+                            needsDistanceOrWeight && (sa.distanceM == null || sa.carriedWeightKg == null)
+                        }
 
-                if (shouldRefreshFromRemote) {
-                    try {
-                        val localDate = date.toInstant().atZone(ZoneId.systemDefault()).toLocalDate()
-                        val remoteSports = remoteRepository.fetchSportActivitiesForDate(localDate).getOrNull()
-                        if (!remoteSports.isNullOrEmpty()) {
-                            repository.deleteActivitiesForDay(startOfDay, endOfDay)
-                            remoteSports.forEach { rs: SportActivityResponse ->
-                                val epochMillis = toEpochMillisUtc(rs.loggedAt)
-                                repository.insertSportActivity(
+                    if (shouldRefreshFromRemote) {
+                        try {
+                            val date = selectedDate.value
+                            val start = date.time.atStartOfDay()
+                            val end = date.time.atEndOfDay()
+                            val localDate = date.toInstant().atZone(ZoneId.systemDefault()).toLocalDate()
+                            val remoteSports = remoteRepository.fetchSportActivitiesForDate(localDate).getOrNull()
+                            if (!remoteSports.isNullOrEmpty()) {
+                                val toInsert = remoteSports.map { rs: SportActivityResponse ->
+                                    val epochMillis = toEpochMillisUtc(rs.loggedAt)
                                     com.nutrition.app.data.local.entities.SportActivity(
                                         activityName = rs.activityName,
                                         durationMinutes = rs.durationMinutes,
@@ -119,15 +129,18 @@ class DailyLogViewModel @Inject constructor(
                                         date = epochMillis,
                                         synced = true
                                     )
-                                )
+                                }
+                                repository.deleteActivitiesForDay(start, end)
+                                repository.insertSportActivities(toInsert)
                             }
-                        }
-                    } catch (_: Exception) { /* ignore demo fetch errors */ }
+                        } catch (_: Exception) { }
+                    }
                 }
-            }
         }
+    }
 
-        // No-op: remote sample pull happens on-demand in food logs collector when empty
+    fun selectDate(date: Date) {
+        _selectedDate.value = date
     }
 
     private fun toEpochMillis(dt: LocalDateTime): Long =

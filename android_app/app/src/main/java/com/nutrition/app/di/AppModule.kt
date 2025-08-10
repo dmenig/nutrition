@@ -40,6 +40,7 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import com.nutrition.app.util.ErrorReportingInterceptor
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -80,6 +81,7 @@ object AppModule {
         }
         return OkHttpClient.Builder()
             .addInterceptor(logging)
+            .addInterceptor(ErrorReportingInterceptor())
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
             .callTimeout(20, TimeUnit.SECONDS)

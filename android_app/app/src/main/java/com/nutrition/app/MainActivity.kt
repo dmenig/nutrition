@@ -7,7 +7,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Scaffold
 import androidx.navigation.compose.NavHost
 import androidx.navigation.NavType
 import androidx.navigation.navArgument
@@ -22,6 +27,7 @@ import com.nutrition.app.ui.foodentry.FoodEntryRoute
 import com.nutrition.app.ui.dailylog.DailyLogScreen
 import com.nutrition.app.ui.sportentry.SportEntryForm
 import com.nutrition.app.ui.sportentry.SportEntryRoute
+import com.nutrition.app.ui.plots.PlotsScreen
 import com.nutrition.app.ui.theme.NutritionTheme
 import com.nutrition.app.ui.customfood.CustomFoodListScreen
 import com.nutrition.app.ui.customfood.CustomFoodEntryScreen
@@ -35,6 +41,8 @@ import androidx.work.WorkManager
 import com.nutrition.app.sync.SyncWorker
 import dagger.hilt.android.AndroidEntryPoint
 import java.util.concurrent.TimeUnit
+import com.nutrition.app.util.ErrorReporter
+import kotlinx.coroutines.flow.collectLatest
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -73,7 +81,17 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun NutritionApp() {
     val navController = rememberNavController()
-    NavHost(navController = navController, startDestination = "daily_log") {
+    val snackbarHostState = remember { SnackbarHostState() }
+    LaunchedEffect(Unit) {
+        ErrorReporter.events.collectLatest { message ->
+            snackbarHostState.showSnackbar(message)
+        }
+    }
+
+    Scaffold(
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
+    ) { paddingValues ->
+        NavHost(navController = navController, startDestination = "daily_log") {
         composable("daily_log") {
             DailyLogScreen(
                 onFoodLogClick = { foodLog ->
@@ -85,8 +103,12 @@ fun NutritionApp() {
                     navController.navigate("sport_entry_route?activityName=${sportLog.activityName}&duration=${sportLog.durationMinutes}")
                 },
                 onNavigateToFoodEntry = { navController.navigate("food_entry_route") },
-                onNavigateToSportEntry = { navController.navigate("sport_entry_route") }
+                onNavigateToSportEntry = { navController.navigate("sport_entry_route") },
+                onNavigateToPlots = { navController.navigate("plots") }
             )
+        }
+        composable("plots") {
+            PlotsScreen()
         }
         composable("food_entry_route") {
             FoodEntryRoute(
@@ -144,6 +166,7 @@ fun NutritionApp() {
             CustomFoodEntryScreen(
                 onBackClick = { navController.popBackStack() }
             )
+        }
         }
     }
 }

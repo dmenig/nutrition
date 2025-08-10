@@ -17,6 +17,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -45,7 +46,8 @@ fun DailyLogScreen(
     onFoodLogClick: (FoodLog) -> Unit = {},
     onSportLogClick: (SportActivity) -> Unit = {},
     onNavigateToFoodEntry: () -> Unit = {},
-    onNavigateToSportEntry: () -> Unit = {}
+    onNavigateToSportEntry: () -> Unit = {},
+    onNavigateToPlots: () -> Unit = {}
 ) {
     val selectedDate by viewModel.selectedDate.collectAsState()
     val dailySummary by viewModel.dailySummary.collectAsState()
@@ -57,7 +59,12 @@ fun DailyLogScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text("Daily Log") })
+            TopAppBar(
+                title = { Text("Daily Log") },
+                actions = {
+                    TextButton(onClick = onNavigateToPlots) { Text("Plots") }
+                }
+            )
         }
     ) { paddingValues ->
         Box(modifier = modifier.fillMaxSize().padding(paddingValues)) {
