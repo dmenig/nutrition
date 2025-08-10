@@ -2,6 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import APIKeyHeader
 from app.core.config import settings
 from app.jobs.retrain_model import retrain_model_job
+from sqlalchemy.orm import Session
+from app.db.database import get_db
+from app.db.models import FoodLog, SportActivity, User
+from datetime import datetime, timezone
+from app.main import upsert_daily_summary
+from sqlalchemy import func
 
 router = APIRouter()
 
@@ -28,3 +34,23 @@ async def retrain_model(api_key: str = Depends(get_api_key)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Model retraining failed: {e}",
         )
+
+
+@router.post("/backfill-daily-summaries", status_code=status.HTTP_200_OK)
+def backfill_daily_summaries(api_key: str = Depends(get_api_key), db: Session = Depends(get_db)):
+    # Prefer dummy public user if present; else compute global summaries (user_id None)
+    dummy_user = db.query(User).filter(User.email == "dummy@example.com").first()
+    user_id = dummy_user.id if dummy_user else None
+
+    # Collect distinct dates from food_logs and sport_activities
+    food_dates = db.query(func.date(FoodLog.logged_at)).distinct().all()
+    sport_dates = db.query(func.date(SportActivity.logged_at)).distinct().all()
+    dates = {d[0] for d in food_dates} | {d[0] for d in sport_dates}
+
+    count = 0
+    for d in sorted(dates):
+        # Use UTC midnight for target date
+        target = datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
+        upsert_daily_summary(db, target, user_id)
+        count += 1
+    return {"updated_days": count}
