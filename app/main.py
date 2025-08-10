@@ -325,8 +325,8 @@ def get_plot_data():
         db = SessionLocal()
         try:
             # collect all distinct dates from both tables
-            food_dates = [d[0] for d in db.query(func.date(FoodLog.logged_at)).distinct().all()]
-            sport_dates = [d[0] for d in db.query(func.date(SportActivity.logged_at)).distinct().all()]
+            food_dates = [d[0] for d in db.query(FoodLog.logged_date).distinct().all()]
+            sport_dates = [d[0] for d in db.query(SportActivity.logged_date).distinct().all()]
             all_dates = sorted({*food_dates, *sport_dates})
             if not all_dates:
                 return pd.DataFrame(columns=expected_cols)
@@ -341,15 +341,12 @@ def get_plot_data():
                         func.coalesce(func.sum(FoodLog.carbs), 0.0),
                         func.coalesce(func.sum(FoodLog.fat), 0.0),
                     )
-                    .filter(FoodLog.logged_at >= day_start, FoodLog.logged_at < day_end)
+                    .filter(FoodLog.logged_date == d)
                     .first()
                 )
                 sport_total = (
                     db.query(func.coalesce(func.sum(SportActivity.calories_expended), 0.0))
-                    .filter(
-                        SportActivity.logged_at >= day_start,
-                        SportActivity.logged_at < day_end,
-                    )
+                    .filter(SportActivity.logged_date == d)
                     .scalar()
                     or 0.0
                 }

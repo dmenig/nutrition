@@ -28,6 +28,7 @@ class FoodLog(Base):
     logged_at = Column(
         TIMESTAMP(timezone=True), default=datetime.utcnow, nullable=False
     )
+    logged_date = Column(Date, nullable=True)
 
     user = relationship("User")
 
@@ -44,6 +45,7 @@ class SportActivity(Base):
     logged_at = Column(
         TIMESTAMP(timezone=True), default=datetime.utcnow, nullable=False
     )
+    logged_date = Column(Date, nullable=True)
 
     user = relationship("User")
 

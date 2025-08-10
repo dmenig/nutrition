@@ -18,21 +18,11 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Expression indexes to accelerate GROUP BY date(logged_at)
-    op.execute("CREATE INDEX IF NOT EXISTS ix_food_logs_date ON food_logs ((date(logged_at)))")
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS ix_food_logs_user_date ON food_logs (user_id, (date(logged_at)))"
-    )
-    op.execute("CREATE INDEX IF NOT EXISTS ix_sport_activities_date ON sport_activities ((date(logged_at)))")
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS ix_sport_activities_user_date ON sport_activities (user_id, (date(logged_at)))"
-    )
+    # No-op; superseded by adding stored date columns with normal btree indexes
+    pass
 
 
 def downgrade() -> None:
-    op.execute("DROP INDEX IF EXISTS ix_sport_activities_user_date")
-    op.execute("DROP INDEX IF EXISTS ix_sport_activities_date")
-    op.execute("DROP INDEX IF EXISTS ix_food_logs_user_date")
-    op.execute("DROP INDEX IF EXISTS ix_food_logs_date")
+    pass
 
 

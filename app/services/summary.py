@@ -95,7 +95,7 @@ def backfill_all_summaries(db: Session, user_id) -> int:
 
     # Because the conditional above is messy in ORM, just do it explicitly:
     food_q = db.query(
-        func.date(FoodLog.logged_at).label("date"),
+        FoodLog.logged_date.label("date"),
         func.coalesce(func.sum(FoodLog.calories), 0.0).label("calories_total"),
         func.coalesce(func.sum(FoodLog.protein), 0.0).label("protein_g_total"),
         func.coalesce(func.sum(FoodLog.carbs), 0.0).label("carbs_g_total"),
@@ -103,16 +103,16 @@ def backfill_all_summaries(db: Session, user_id) -> int:
     )
     if user_id:
         food_q = food_q.filter(FoodLog.user_id == user_id)
-    food_q = food_q.group_by(func.date(FoodLog.logged_at))
+    food_q = food_q.group_by(FoodLog.logged_date)
     food_res = food_q.all()
 
     sport_q = db.query(
-        func.date(SportActivity.logged_at).label("date"),
+        SportActivity.logged_date.label("date"),
         func.coalesce(func.sum(SportActivity.calories_expended), 0.0).label("sport_calories_total"),
     )
     if user_id:
         sport_q = sport_q.filter(SportActivity.user_id == user_id)
-    sport_q = sport_q.group_by(func.date(SportActivity.logged_at))
+    sport_q = sport_q.group_by(SportActivity.logged_date)
     sport_res = sport_q.all()
 
     # Merge by date
