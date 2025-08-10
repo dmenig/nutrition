@@ -4,7 +4,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision = '20250810_add_daily_summaries'
-down_revision = '20250809_add_sport_columns'
+down_revision = '20250809_add_sport_cols'
 branch_labels = None
 depends_on = None
 
