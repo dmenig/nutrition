@@ -1,10 +1,11 @@
 package com.nutrition.app.data
 
 import retrofit2.http.GET
+import retrofit2.http.Query
 
 // Data models matching backend schemas
 data class PlotPoint(
-    val time_index: Int,
+    val time_index: Long,
     val value: Float
 )
 
@@ -24,11 +25,11 @@ data class EnergyBalancePlotResponse(
 
 interface PlotsApiService {
     @GET("/api/v1/plots/weight")
-    suspend fun getWeightPlot(): WeightPlotResponse
+    suspend fun getWeightPlot(@Query("simple") simple: Boolean = true): WeightPlotResponse
 
     @GET("/api/v1/plots/metabolism")
-    suspend fun getMetabolismPlot(): MetabolismPlotResponse
+    suspend fun getMetabolismPlot(@Query("simple") simple: Boolean = true): MetabolismPlotResponse
 
     @GET("/api/v1/plots/energy-balance")
-    suspend fun getEnergyBalancePlot(): EnergyBalancePlotResponse
+    suspend fun getEnergyBalancePlot(@Query("simple") simple: Boolean = true): EnergyBalancePlotResponse
 }

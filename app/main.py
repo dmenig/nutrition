@@ -269,7 +269,7 @@ async def reload_model(background_tasks: BackgroundTasks):
 app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
 
 
-def get_plot_data():
+def get_plot_data(prefer_lightweight: bool = False):
     # Prefer real model outputs and features when available; otherwise, fallback to DB summaries
     results_path = "data/final_results.csv"
     expected_cols = [
@@ -455,14 +455,23 @@ def get_plot_data():
         else:
             return out[expected_cols]
 
-    # Priority: results CSV -> features+model -> DB summaries -> direct DB agg
-    df = _load_results_csv()
-    if df.empty:
-        df = _build_from_features_with_model()
-    if df.empty:
-        df = _build_from_daily_summaries()
-    if df.empty:
-        df = _build_from_db_on_the_fly()
+    # Priority:
+    # - Normal: results CSV -> features+model -> DB summaries -> direct DB agg
+    # - Lightweight: skip heavy model path to reduce latency on mobile
+    if prefer_lightweight:
+        df = _load_results_csv()
+        if df.empty:
+            df = _build_from_daily_summaries()
+        if df.empty:
+            df = _build_from_db_on_the_fly()
+    else:
+        df = _load_results_csv()
+        if df.empty:
+            df = _build_from_features_with_model()
+        if df.empty:
+            df = _build_from_daily_summaries()
+        if df.empty:
+            df = _build_from_db_on_the_fly()
 
     # Ensure expected columns exist
     for col_name in expected_cols:
@@ -565,8 +574,8 @@ def plots_debug():
 
 
 @app.get("/api/v1/plots/weight", response_model=WeightPlotResponse, tags=["plots"])
-def get_weight_plot_data():
-    df = get_plot_data()
+def get_weight_plot_data(simple: bool = False):
+    df = get_plot_data(prefer_lightweight=simple)
     # Only include points with meaningful weights (> 0). If none, return empty to allow client fallback.
     w_obs = [
         {"time_index": row["time_index"], "value": float(row["W_obs"])}
@@ -584,8 +593,8 @@ def get_weight_plot_data():
 @app.get(
     "/api/v1/plots/metabolism", response_model=MetabolismPlotResponse, tags=["plots"]
 )
-def get_metabolism_plot_data():
-    df = get_plot_data()
+def get_metabolism_plot_data(simple: bool = False):
+    df = get_plot_data(prefer_lightweight=simple)
     m_values = [float(v) for v in df["M_base"].tolist() if pd.notnull(v)]
     # If metabolism is a flat placeholder at 2500 across all points, return empty to allow client fallback
     m_series: list[dict] = []
@@ -603,8 +612,8 @@ def get_metabolism_plot_data():
     response_model=EnergyBalancePlotResponse,
     tags=["plots"],
 )
-def get_energy_balance_plot_data():
-    df = get_plot_data()
+def get_energy_balance_plot_data(simple: bool = False):
+    df = get_plot_data(prefer_lightweight=simple)
     return EnergyBalancePlotResponse(
         calories_unnorm=[
             {"time_index": row["time_index"], "value": row["calories_unnorm"]}
@@ -623,8 +632,8 @@ def get_energy_balance_plot_data():
     response_model=EnergyBalancePlotResponse,
     tags=["plots"],
 )
-def get_energy_balance_plot_data_alias():
-    return get_energy_balance_plot_data()
+def get_energy_balance_plot_data_alias(simple: bool = False):
+    return get_energy_balance_plot_data(simple=simple)
 
 
 @app.get("/plots", tags=["plots"])
