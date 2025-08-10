@@ -13,7 +13,7 @@ from app.schemas import (
 )  # Import DailyFoodLogSummary
 from app.core.auth import get_current_user
 from app.db.database import get_db
-from app.main import upsert_daily_summary
+from app.services.summary import upsert_daily_summary
 
 router = APIRouter()
 

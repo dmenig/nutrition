@@ -10,7 +10,7 @@ from app.db.models import SportActivity, User
 from app.db.database import get_db
 from app.core.auth import get_current_user
 from sport_formulas import MET_VALUES, evaluate_sport_formula
-from app.main import upsert_daily_summary
+from app.services.summary import upsert_daily_summary
 
 router = APIRouter()
 
