@@ -13,6 +13,7 @@ from app.schemas import (
 )  # Import DailyFoodLogSummary
 from app.core.auth import get_current_user
 from app.db.database import get_db
+from app.main import upsert_daily_summary
 
 router = APIRouter()
 
@@ -58,6 +59,8 @@ def create_food_log(
     db.add(db_food_log)
     db.commit()
     db.refresh(db_food_log)
+    # Update daily summary for the specific day
+    upsert_daily_summary(db, db_food_log.logged_at, current_user.id)
     return db_food_log
 
 
@@ -155,6 +158,7 @@ def update_food_log(
 
     db.commit()
     db.refresh(db_food_log)
+    upsert_daily_summary(db, db_food_log.logged_at, current_user.id)
     return db_food_log
 
 
@@ -172,6 +176,8 @@ def delete_food_log(
     if not db_food_log:
         raise HTTPException(status_code=404, detail="Food log not found")
 
+    day = db_food_log.logged_at
     db.delete(db_food_log)
     db.commit()
+    upsert_daily_summary(db, day, current_user.id)
     return {"message": "Food log deleted successfully"}
