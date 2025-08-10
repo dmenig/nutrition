@@ -291,28 +291,22 @@ def get_plot_data():
     def _build_from_daily_summaries() -> pd.DataFrame:
         db = SessionLocal()
         try:
-            # Prefer a dummy public user if present
-            dummy = db.query(User).filter(User.email == "dummy@example.com").first()
-            q = db.query(DailySummary).order_by(DailySummary.date.asc())
-            # If a dummy user exists, try it first; fallback to unscoped if no rows
-            rows = []
-            if dummy is not None:
-                rows = q.filter(DailySummary.user_id == dummy.id).all()
-            if not rows:
-                rows = q.all()
+            # Unscoped: aggregate across all users by date for public plots
+            rows = db.query(DailySummary).order_by(DailySummary.date.asc()).all()
             if not rows:
                 return pd.DataFrame(columns=expected_cols)
-            df = pd.DataFrame(
-                [
-                    {
-                        "date": r.date,
-                        "calories": r.calories_total or 0.0,
-                        "sport": r.sport_calories_total or 0.0,
-                        "M_base": 2500.0,
-                    }
-                    for r in rows
-                ]
-            )
+            df = pd.DataFrame([
+                {
+                    "date": r.date,
+                    "calories": r.calories_total or 0.0,
+                    "sport": r.sport_calories_total or 0.0,
+                }
+                for r in rows
+            ])
+            # Sum across users per date
+            df = df.groupby("date", as_index=False).sum(numeric_only=True)
+            # Add a reasonable constant metabolism placeholder
+            df["M_base"] = 2500.0
             # Fill required columns
             df["W_obs"] = pd.Series(dtype=float)
             df["W_adj_pred"] = pd.Series(dtype=float)
@@ -444,22 +438,7 @@ def get_plot_data():
     if df.empty:
         df = _build_from_db_on_the_fly()
 
-    # If empty, fallback to features-derived construction
-    if df.empty:
-        df = _fallback_build_from_features()
-
-    # As a last resort, synthesize a small non-empty dataset so plots render
-    if df.empty:
-        n_days = 30
-        synthetic = pd.DataFrame()
-        synthetic["W_obs"] = pd.Series([70.0 + (i % 5) * 0.1 for i in range(n_days)], dtype=float)
-        synthetic["W_adj_pred"] = (
-            synthetic["W_obs"].rolling(window=7, min_periods=1).mean().astype(float)
-        )
-        synthetic["M_base"] = 2500.0
-        synthetic["calories"] = 2200.0
-        synthetic["sport"] = 300.0
-        df = synthetic
+    # Do NOT synthesize or use CSV for prod plots; return real DB-only
 
     # Ensure expected columns exist and are numeric
     for col_name in expected_cols:
