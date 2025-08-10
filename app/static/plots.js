@@ -21,7 +21,7 @@ async function renderWeightChart(chart, range) {
   chart.setOption({
     tooltip: { trigger: 'axis' },
     legend: { data: ['Observed', 'Adjusted'] },
-    xAxis: { type: 'value', name: 'Day' },
+    xAxis: { type: 'time', name: 'Date' },
     yAxis: { type: 'value', name: 'Weight (kg)' },
     series: [
       { name: 'Observed', type: 'line', showSymbol: false, data: wObs },
@@ -36,7 +36,7 @@ async function renderMetabolismChart(chart, range) {
   chart.setOption({
     tooltip: { trigger: 'axis' },
     legend: { data: ['Base Metabolism'] },
-    xAxis: { type: 'value', name: 'Day' },
+    xAxis: { type: 'time', name: 'Date' },
     yAxis: { type: 'value', name: 'kcal/day' },
     series: [{ name: 'Base Metabolism', type: 'line', showSymbol: false, data: mBase }],
   });
@@ -49,7 +49,7 @@ async function renderEnergyChart(chart, range) {
   chart.setOption({
     tooltip: { trigger: 'axis' },
     legend: { data: ['Calories In', 'Expended (metabolism + sport)'] },
-    xAxis: { type: 'value', name: 'Day' },
+    xAxis: { type: 'time', name: 'Date' },
     yAxis: { type: 'value', name: 'kcal' },
     series: [
       { name: 'Calories In', type: 'line', showSymbol: false, data: cal },

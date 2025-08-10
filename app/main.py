@@ -281,32 +281,47 @@ def get_plot_data():
     ]
 
     def _load_results_csv() -> pd.DataFrame:
-        if os.path.exists(results_path):
-            try:
-                df = pd.read_csv(results_path)
-                # Normalize date column if present
-                if "Date" in df.columns and "date" not in df.columns:
-                    df = df.rename(columns={"Date": "date"})
-                # If results lack a date column, try to attach it from features.csv
-                if "date" not in df.columns:
-                    try:
-                        f_path = "data/features.csv"
-                        if os.path.exists(f_path):
-                            f = pd.read_csv(f_path)
-                            if "Date" in f.columns and "date" not in f.columns:
-                                f = f.rename(columns={"Date": "date"})
-                            if "date" in f.columns and len(f["date"]) >= len(df):
-                                df.insert(0, "date", f["date"].iloc[: len(df)].values)
-                    except Exception:
-                        pass
-                # Keep only expected
-                for col in expected_cols:
-                    if col not in df.columns:
-                        df[col] = pd.Series(dtype=float)
-                return df
-            except Exception:
+        """Load precomputed results if they look complete and usable.
+
+        We require a valid parsable 'date' column and at least one non-empty
+        series among expected_cols to avoid returning degenerate constant data.
+        """
+        if not os.path.exists(results_path):
+            return pd.DataFrame(columns=expected_cols)
+        try:
+            df = pd.read_csv(results_path)
+            # Normalize date column if present
+            if "Date" in df.columns and "date" not in df.columns:
+                df = df.rename(columns={"Date": "date"})
+            # If results lack a date column, try to attach it from features.csv
+            if "date" not in df.columns:
+                try:
+                    f_path = "data/features.csv"
+                    if os.path.exists(f_path):
+                        f = pd.read_csv(f_path)
+                        if "Date" in f.columns and "date" not in f.columns:
+                            f = f.rename(columns={"Date": "date"})
+                        if "date" in f.columns and len(f["date"]) >= len(df):
+                            df.insert(0, "date", f["date"].iloc[: len(df)].values)
+                except Exception:
+                    # If we cannot attach a date, consider the CSV unusable
+                    pass
+
+            # Validate that we have a usable date column and any non-empty series
+            if "date" not in df.columns:
                 return pd.DataFrame(columns=expected_cols)
-        return pd.DataFrame(columns=expected_cols)
+
+            # Do not pre-fill missing expected columns here; let downstream logic handle it
+            has_any_series = any(
+                (col in df.columns) and pd.to_numeric(df[col], errors="coerce").notna().any()
+                for col in expected_cols
+            )
+            if not has_any_series:
+                return pd.DataFrame(columns=expected_cols)
+
+            return df
+        except Exception:
+            return pd.DataFrame(columns=expected_cols)
 
     def _build_from_daily_summaries() -> pd.DataFrame:
         db = SessionLocal()
@@ -463,12 +478,23 @@ def get_plot_data():
     if "date" in df.columns:
         try:
             dt = pd.to_datetime(df["date"], errors="coerce")
+            # Drop rows with invalid dates to avoid epoch 1970 artifacts
+            valid_mask = dt.notna()
+            df = df.loc[valid_mask].copy()
+            dt = dt.loc[valid_mask]
             # Convert to epoch milliseconds
-            df["time_index"] = (dt.astype("int64") // 1_000_000)
+            # Using view("int64") is compatible with modern pandas
+            df["time_index"] = (dt.view("int64") // 1_000_000).astype("int64")
         except Exception:
-            df["time_index"] = range(len(df))
+            # As a conservative fallback, keep a monotonically increasing daily index anchored to today
+            start_ms = int(pd.Timestamp.utcnow().normalize().value // 1_000_000)
+            one_day_ms = 24 * 60 * 60 * 1000
+            df["time_index"] = [start_ms + i * one_day_ms for i in range(len(df))]
     else:
-        df["time_index"] = range(len(df))
+        # If we truly have no dates, synthesize a daily timeline anchored to today
+        start_ms = int(pd.Timestamp.utcnow().normalize().value // 1_000_000)
+        one_day_ms = 24 * 60 * 60 * 1000
+        df["time_index"] = [start_ms + i * one_day_ms for i in range(len(df))]
 
     # Try to load normalization parameters; if missing, use identity transform
     calories_mean = 0.0
