@@ -94,16 +94,20 @@ class DailyLogViewModel @Inject constructor(
         viewModelScope.launch {
             repository.getActivitiesForDay(startOfDay, endOfDay).collect { sportActivities ->
                 _sportLogs.value = sportActivities
-                if (sportActivities.isEmpty()) {
-                    // Fallback: fetch remote sports for the date and insert locally
+
+                val shouldRefreshFromRemote = sportActivities.isEmpty() ||
+                    sportActivities.any { sa ->
+                        val needsDistanceOrWeight = sa.activityName in listOf("Walking", "Running", "Cycling")
+                        needsDistanceOrWeight && (sa.distanceM == null || sa.carriedWeightKg == null)
+                    }
+
+                if (shouldRefreshFromRemote) {
                     try {
                         val localDate = date.toInstant().atZone(ZoneId.systemDefault()).toLocalDate()
                         val remoteSports = remoteRepository.fetchSportActivitiesForDate(localDate).getOrNull()
                         if (!remoteSports.isNullOrEmpty()) {
-                            // Replace local day's activities with server truth to avoid duplicates or drifts
                             repository.deleteActivitiesForDay(startOfDay, endOfDay)
                             remoteSports.forEach { rs: SportActivityResponse ->
-                                // Remote timestamps are UTC; convert accordingly to avoid TZ shifts
                                 val epochMillis = toEpochMillisUtc(rs.loggedAt)
                                 repository.insertSportActivity(
                                     com.nutrition.app.data.local.entities.SportActivity(
