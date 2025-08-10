@@ -82,10 +82,11 @@ object AppModule {
         return OkHttpClient.Builder()
             .addInterceptor(logging)
             .addInterceptor(ErrorReportingInterceptor())
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(15, TimeUnit.SECONDS)
-            .callTimeout(20, TimeUnit.SECONDS)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .callTimeout(60, TimeUnit.SECONDS)
             .retryOnConnectionFailure(true)
+            .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
             .build()
     }
 

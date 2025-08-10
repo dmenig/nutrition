@@ -9,33 +9,41 @@ import javax.inject.Singleton
 class PlotsRepository @Inject constructor(
     private val plotsApiService: PlotsApiService
 ) {
-    private fun synthesizeEntries(count: Int, base: Float, amplitude: Float): List<Entry> {
-        if (count <= 0) return emptyList()
-        return (0 until count).map { idx ->
-            val y = base + ((idx % 7) - 3) * (amplitude / 3f)
-            Entry(idx.toFloat(), y)
-        }
-    }
+    // No client-side fallback: if series are empty, return empty lists so the chart shows "Nothing found".
+      // MPAndroidChart uses Float for X, which lacks precision for epoch milliseconds.
+      // Use days-since-epoch as X to avoid precision loss and format back to full dates in the chart.
 
-    private fun nonEmptyOrFallback(series: List<Entry>, base: Float): List<Entry> {
-        return if (series.isEmpty()) synthesizeEntries(30, base = base, amplitude = base * 0.1f) else series
-    }
+      private fun toDaysSinceEpoch(epochMs: Long): Float {
+          return (epochMs / 86_400_000.0).toFloat()
+      }
 
     suspend fun getWeightData(dateRange: DateRange): List<Entry> {
-        val resp = plotsApiService.getWeightPlot()
-        val data = resp.W_obs.map { Entry(it.time_index.toFloat(), it.value) }
-        return nonEmptyOrFallback(data, base = 70f)
+        val (simple, days) = when (dateRange) {
+            DateRange.WEEK -> true to 7
+            DateRange.MONTH -> true to 30
+            DateRange.YEAR -> true to 365
+        }
+        val resp = plotsApiService.getWeightPlot(simple = simple, days = days)
+          return resp.W_obs.map { Entry(toDaysSinceEpoch(it.time_index), it.value) }
     }
 
     suspend fun getMetabolismData(dateRange: DateRange): List<Entry> {
-        val resp = plotsApiService.getMetabolismPlot()
-        val data = resp.M_base.map { Entry(it.time_index.toFloat(), it.value) }
-        return nonEmptyOrFallback(data, base = 2500f)
+        val (simple, days) = when (dateRange) {
+            DateRange.WEEK -> true to 7
+            DateRange.MONTH -> true to 30
+            DateRange.YEAR -> true to 365
+        }
+        val resp = plotsApiService.getMetabolismPlot(simple = simple, days = days)
+          return resp.M_base.map { Entry(toDaysSinceEpoch(it.time_index), it.value) }
     }
 
     suspend fun getEnergyBalanceData(dateRange: DateRange): List<Entry> {
-        val resp = plotsApiService.getEnergyBalancePlot()
-        val data = resp.calories_unnorm.map { Entry(it.time_index.toFloat(), it.value) }
-        return nonEmptyOrFallback(data, base = 2200f)
+        val (simple, days) = when (dateRange) {
+            DateRange.WEEK -> true to 7
+            DateRange.MONTH -> true to 30
+            DateRange.YEAR -> true to 365
+        }
+        val resp = plotsApiService.getEnergyBalancePlot(simple = simple, days = days)
+          return resp.calories_unnorm.map { Entry(toDaysSinceEpoch(it.time_index), it.value) }
     }
 }
