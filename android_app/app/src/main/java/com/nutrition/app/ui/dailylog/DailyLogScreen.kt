@@ -34,6 +34,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.nutrition.app.data.local.entities.FoodLog
 import com.nutrition.app.data.local.entities.SportActivity
 import java.util.Date
+import java.text.SimpleDateFormat
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -175,7 +177,8 @@ fun DailyLogScreen(
 
 // Extension function for Date formatting (will be replaced by a proper formatter)
 fun Date.toFormattedString(): String {
-    return this.toLocaleString() // Simple formatting for now
+    // Use a stable, locale-aware formatter with 4-digit year
+    return SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(this)
 }
 
 @Composable
