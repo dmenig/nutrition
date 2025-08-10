@@ -15,6 +15,19 @@ Notes:
 - A debug keystore is generated automatically if missing (see `android_app/app/build.gradle` `preBuild` task).
 - Min SDK 24, Target SDK 34. Application ID: `com.nutrition.app`.
 
+### Quick: build and install on a connected phone (USB)
+
+```bash
+cd android_app
+# Build and install the debug variant on the connected device
+./gradlew installDebug
+
+# Launch the app
+adb shell monkey -p com.nutrition.app -c android.intent.category.LAUNCHER 1
+```
+
+If `adb` cannot find a device, ensure Developer options and USB debugging are enabled on the phone. Use `adb devices` to verify.
+
 ### Backend/API Base URL
 - Defined in `android_app/app/src/main/java/com/nutrition/app/di/AppModule.kt` inside `provideRetrofit(...)` via `.baseUrl("...")`.
 - Default: `https://nutrition-tbdo.onrender.com/`.
@@ -73,7 +86,7 @@ Notes:
   - `curl -sS https://nutrition-tbdo.onrender.com/api/v1/plots/weight | jq '.W_obs | length'`
   - `curl -sS https://nutrition-tbdo.onrender.com/api/v1/plots/metabolism | jq '.M_base | length'`
   - `curl -sS https://nutrition-tbdo.onrender.com/api/v1/plots/energy-balance | jq '.calories_unnorm | length'`
-- If plots return 0 points, the backend includes a fallback to synthesize series from `data/features.csv`. You can also trigger a rebuild endpoint:
+- If plots return 0 points, the mobile app shows "Nothing found" and no series are drawn. You can optionally attempt to prebuild plot data on the server:
   - `curl -X POST https://nutrition-tbdo.onrender.com/api/v1/plots/rebuild`
 
 
