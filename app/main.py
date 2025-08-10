@@ -25,6 +25,7 @@ from fastapi import BackgroundTasks
 import torch
 from train_model import FinalModel, reconstruct_trajectory  # Import the model and trajectory util
 import json  # Added import for json
+import pathlib
 
 Base.metadata.create_all(bind=engine)
 
@@ -415,6 +416,40 @@ def get_plot_data():
     df["sport_unnorm"] = df["sport"] * sport_std + sport_mean
     df["C_exp_t"] = df["M_base"].fillna(0) + df["sport_unnorm"]
     return df
+
+
+@app.get("/api/v1/plots/debug", tags=["plots"])
+def plots_debug():
+    results_path = pathlib.Path("data/final_results.csv")
+    features_path = pathlib.Path("data/features.csv")
+    debug = {
+        "cwd": str(pathlib.Path.cwd()),
+        "results_exists": results_path.exists(),
+        "features_exists": features_path.exists(),
+        "results_rows": 0,
+        "features_rows": 0,
+        "final_rows": 0,
+        "final_cols": [],
+    }
+    try:
+        if results_path.exists():
+            df_r = pd.read_csv(results_path)
+            debug["results_rows"] = int(len(df_r))
+    except Exception as e:
+        debug["results_error"] = str(e)
+    try:
+        if features_path.exists():
+            df_f = pd.read_csv(features_path)
+            debug["features_rows"] = int(len(df_f))
+    except Exception as e:
+        debug["features_error"] = str(e)
+    try:
+        df_final = get_plot_data()
+        debug["final_rows"] = int(len(df_final))
+        debug["final_cols"] = list(df_final.columns)
+    except Exception as e:
+        debug["final_error"] = str(e)
+    return debug
 
 
 @app.get("/api/v1/plots/weight", response_model=WeightPlotResponse, tags=["plots"])
