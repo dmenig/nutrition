@@ -270,8 +270,7 @@ app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
 
 
 def get_plot_data(prefer_lightweight: bool = False, last_n: int | None = None):
-    # Prefer real model outputs and features when available; otherwise, fallback to DB summaries
-    results_path = "data/final_results.csv"
+    # Construct plot data strictly from the database (no CSVs in production)
     expected_cols = [
         "W_obs",
         "W_adj_pred",
@@ -279,49 +278,6 @@ def get_plot_data(prefer_lightweight: bool = False, last_n: int | None = None):
         "calories",
         "sport",
     ]
-
-    def _load_results_csv() -> pd.DataFrame:
-        """Load precomputed results if they look complete and usable.
-
-        We require a valid parsable 'date' column and at least one non-empty
-        series among expected_cols to avoid returning degenerate constant data.
-        """
-        if not os.path.exists(results_path):
-            return pd.DataFrame(columns=expected_cols)
-        try:
-            df = pd.read_csv(results_path)
-            # Normalize date column if present
-            if "Date" in df.columns and "date" not in df.columns:
-                df = df.rename(columns={"Date": "date"})
-            # If results lack a date column, try to attach it from features.csv
-            if "date" not in df.columns:
-                try:
-                    f_path = "data/features.csv"
-                    if os.path.exists(f_path):
-                        f = pd.read_csv(f_path)
-                        if "Date" in f.columns and "date" not in f.columns:
-                            f = f.rename(columns={"Date": "date"})
-                        if "date" in f.columns and len(f["date"]) >= len(df):
-                            df.insert(0, "date", f["date"].iloc[: len(df)].values)
-                except Exception:
-                    # If we cannot attach a date, consider the CSV unusable
-                    pass
-
-            # Validate that we have a usable date column and any non-empty series
-            if "date" not in df.columns:
-                return pd.DataFrame(columns=expected_cols)
-
-            # Do not pre-fill missing expected columns here; let downstream logic handle it
-            has_any_series = any(
-                (col in df.columns) and pd.to_numeric(df[col], errors="coerce").notna().any()
-                for col in expected_cols
-            )
-            if not has_any_series:
-                return pd.DataFrame(columns=expected_cols)
-
-            return df
-        except Exception:
-            return pd.DataFrame(columns=expected_cols)
 
     def _build_from_daily_summaries() -> pd.DataFrame:
         db = SessionLocal()
@@ -395,82 +351,82 @@ def get_plot_data(prefer_lightweight: bool = False, last_n: int | None = None):
         finally:
             db.close()
 
-    def _build_from_features_with_model() -> pd.DataFrame:
-        """Use features and the loaded model to compute weight and metabolism series."""
-        # Load or generate features
-        features_path = "data/features.csv"
-        features_df = None
-        if os.path.exists(features_path):
-            try:
-                features_df = pd.read_csv(features_path)
-            except Exception:
-                features_df = None
-        if features_df is None:
-            try:
-                from build_features import main as build_features_main
-                features_df = build_features_main(
-                    journal_path="data/processed_journal.csv",
-                    variables_path="data/variables.csv",
-                )
-            except Exception:
-                features_df = None
-        if features_df is None or features_df.empty:
-            return pd.DataFrame(columns=expected_cols)
-
-        # Normalize column names and pick inputs
-        if "Date" in features_df.columns and "date" not in features_df.columns:
-            features_df = features_df.rename(columns={"Date": "date"})
-        # Ensure numeric
-        for col_name in ["calories", "carbs", "sugar", "sel", "alcool", "water", "sport", "pds"]:
-            if col_name in features_df.columns:
-                features_df[col_name] = pd.to_numeric(features_df[col_name], errors="coerce").fillna(0)
-
-        # Get model outputs
+    def _build_features_from_db() -> pd.DataFrame:
+        """Build minimal features directly from DB for model usage (no CSV)."""
+        db = SessionLocal()
         try:
-            outputs = prediction_service.predict_from_features(features_df)
-            out = pd.DataFrame({
-                "W_obs": outputs.get("actual_weight", []),
-                "W_adj_pred": outputs.get("predicted_adjusted_weight", []),
-                "M_base": outputs.get("base_metabolism_kcal", []),
-                "calories": features_df.get("calories", 0),
-                "sport": features_df.get("sport", 0),
-            })
-        except Exception:
-            # As a fallback, construct minimal series without model
-            out = pd.DataFrame()
-            out["W_obs"] = pd.to_numeric(features_df.get("pds", 0), errors="coerce")
-            if out["W_obs"].notna().any():
-                out["W_adj_pred"] = out["W_obs"].rolling(window=7, min_periods=1).mean().astype(float)
-            else:
-                out["W_adj_pred"] = pd.Series(dtype=float)
-            out["M_base"] = 2500.0
-            out["calories"] = pd.to_numeric(features_df.get("calories", 0), errors="coerce").fillna(0)
-            out["sport"] = pd.to_numeric(features_df.get("sport", 0), errors="coerce").fillna(0)
+            # Aggregate per day calories and carbs; set other nutrition features to 0
+            food_rows = (
+                db.query(
+                    FoodLog.logged_date.label("date"),
+                    func.coalesce(func.sum(FoodLog.calories), 0.0).label("calories"),
+                    func.coalesce(func.sum(FoodLog.carbs), 0.0).label("carbs"),
+                )
+                .group_by(FoodLog.logged_date)
+                .all()
+            )
+            sport_rows = (
+                db.query(
+                    SportActivity.logged_date.label("date"),
+                    func.coalesce(func.sum(SportActivity.calories_expended), 0.0).label("sport"),
+                )
+                .group_by(SportActivity.logged_date)
+                .all()
+            )
+            dates = sorted({r.date for r in food_rows} | {r.date for r in sport_rows})
+            if not dates:
+                return pd.DataFrame(columns=["date", "calories", "carbs", "sugar", "sel", "alcool", "water", "sport", "pds"])  # empty
+            food_by_date = {r.date: r for r in food_rows}
+            sport_by_date = {r.date: r for r in sport_rows}
+            records: list[dict] = []
+            for d in dates:
+                fr = food_by_date.get(d)
+                sr = sport_by_date.get(d)
+                records.append(
+                    {
+                        "date": d,
+                        "calories": float(getattr(fr, "calories", 0.0) or 0.0),
+                        "carbs": float(getattr(fr, "carbs", 0.0) or 0.0),
+                        "sugar": 0.0,
+                        "sel": 0.0,
+                        "alcool": 0.0,
+                        "water": 0.0,
+                        "sport": float(getattr(sr, "sport", 0.0) or 0.0),
+                        # Observed weight unknown in DB; use 0 to allow model to run
+                        "pds": 0.0,
+                    }
+                )
+            return pd.DataFrame(records)
+        finally:
+            db.close()
 
-        # Attach date if available
-        if "date" in features_df.columns:
-            out.insert(0, "date", features_df["date"])  # ensure first column is date
-        if "date" in out.columns:
-            return out[["date", *expected_cols]]
-        else:
-            return out[expected_cols]
-
-    # Priority:
-    # - Normal: results CSV -> features+model -> DB summaries -> direct DB agg
-    # - Lightweight: skip heavy model path to reduce latency on mobile
+    # Priority (DB-only):
+    # - Normal: features from DB + model -> daily summaries -> direct DB agg
+    # - Lightweight: daily summaries -> direct DB agg
     if prefer_lightweight:
-        df = _load_results_csv()
-        # Even in lightweight mode, try the model path if CSV is missing to avoid empty plots
-        if df.empty:
-            df = _build_from_features_with_model()
-        if df.empty:
-            df = _build_from_daily_summaries()
+        df = _build_from_daily_summaries()
         if df.empty:
             df = _build_from_db_on_the_fly()
     else:
-        df = _load_results_csv()
-        if df.empty:
-            df = _build_from_features_with_model()
+        # Try model using DB-derived features
+        features_df = _build_features_from_db()
+        if features_df is not None and not features_df.empty:
+            try:
+                outputs = prediction_service.predict_from_features(features_df)
+                df = pd.DataFrame(
+                    {
+                        "date": features_df["date"],
+                        "W_obs": outputs.get("actual_weight", []),
+                        "W_adj_pred": outputs.get("predicted_adjusted_weight", []),
+                        "M_base": outputs.get("base_metabolism_kcal", []),
+                        "calories": features_df.get("calories", 0),
+                        "sport": features_df.get("sport", 0),
+                    }
+                )
+            except Exception:
+                df = pd.DataFrame()
+        else:
+            df = pd.DataFrame()
         if df.empty:
             df = _build_from_daily_summaries()
         if df.empty:
@@ -551,29 +507,24 @@ def get_plot_data(prefer_lightweight: bool = False, last_n: int | None = None):
 
 @app.get("/api/v1/plots/debug", tags=["plots"])
 def plots_debug():
-    results_path = pathlib.Path("data/final_results.csv")
-    features_path = pathlib.Path("data/features.csv")
     debug = {
         "cwd": str(pathlib.Path.cwd()),
-        "results_exists": results_path.exists(),
-        "features_exists": features_path.exists(),
-        "results_rows": 0,
-        "features_rows": 0,
+        "db_daily_summaries": 0,
+        "db_food_days": 0,
+        "db_sport_days": 0,
         "final_rows": 0,
         "final_cols": [],
     }
     try:
-        if results_path.exists():
-            df_r = pd.read_csv(results_path)
-            debug["results_rows"] = int(len(df_r))
+        db = SessionLocal()
+        try:
+            debug["db_daily_summaries"] = int(db.query(func.count(DailySummary.id)).scalar() or 0)
+            debug["db_food_days"] = int(db.query(func.count(func.distinct(FoodLog.logged_date))).scalar() or 0)
+            debug["db_sport_days"] = int(db.query(func.count(func.distinct(SportActivity.logged_date))).scalar() or 0)
+        finally:
+            db.close()
     except Exception as e:
-        debug["results_error"] = str(e)
-    try:
-        if features_path.exists():
-            df_f = pd.read_csv(features_path)
-            debug["features_rows"] = int(len(df_f))
-    except Exception as e:
-        debug["features_error"] = str(e)
+        debug["db_error"] = str(e)
     try:
         df_final = get_plot_data()
         debug["final_rows"] = int(len(df_final))

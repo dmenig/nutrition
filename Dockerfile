@@ -24,7 +24,6 @@ COPY nutrition_calculator.py /app/
 COPY process_nutrition_journal.py /app/
 COPY plot_results.py /app/
 COPY analyze_sensitivity.py /app/
-COPY data /app/data
 COPY app/db/populate_db.py /app/app/db/
 COPY app/init_plots.py /app/app/
 
@@ -33,5 +32,6 @@ COPY app/init_plots.py /app/app/
 # Make port 8000 available to the world outside this container
 EXPOSE 8000
 
-# Run app.main:app when the container launches (ensure plots CSV exists first)
-CMD ["sh", "-c", "python app/db/populate_db.py && python app/init_plots.py && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+# Run app.main:app when the container launches
+# Only initialize DB once if needed; no CSV usage in production
+CMD ["sh", "-c", "python app/db/populate_db.py && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
