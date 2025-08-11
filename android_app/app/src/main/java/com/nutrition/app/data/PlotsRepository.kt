@@ -9,13 +9,31 @@ import javax.inject.Singleton
 class PlotsRepository @Inject constructor(
     private val plotsApiService: PlotsApiService
 ) {
-    // No client-side fallback: if series are empty, return empty lists so the chart shows "Nothing found".
-      // MPAndroidChart uses Float for X, which lacks precision for epoch milliseconds.
-      // Use days-since-epoch as X to avoid precision loss and format back to full dates in the chart.
+    // MPAndroidChart uses Float for X; avoid precision loss by using days-since-epoch on the axis.
+    // Normalize backend time_index which may be in ms, seconds, or days (older servers).
+    private fun normalizeToEpochMs(raw: Long): Long {
+        return when {
+            // Clearly in milliseconds (>= ~2001-09-09 in ms). Modern servers send ms.
+            raw >= 1_000_000_000_000L -> raw
+            // Likely in seconds (>= ~2001-09-09 in seconds too high to be days)
+            raw >= 100_000_000L -> raw * 1_000L
+            // Otherwise treat as days-since-epoch
+            else -> raw * 86_400_000L
+        }
+    }
 
-      private fun toDaysSinceEpoch(epochMs: Long): Float {
-          return (epochMs / 86_400_000.0).toFloat()
-      }
+    private fun toDaysSinceEpochFromAny(rawTimeIndex: Long): Float {
+        val epochMs = normalizeToEpochMs(rawTimeIndex)
+        return (epochMs / 86_400_000.0).toFloat()
+    }
+
+    private fun <T> dropIfConstant(entries: List<T>, valueOf: (T) -> Float): List<T> {
+        if (entries.isEmpty()) return entries
+        val first = valueOf(entries.first())
+        val epsilon = 1e-6f
+        val allSame = entries.all { kotlin.math.abs(valueOf(it) - first) < epsilon }
+        return if (allSame) emptyList() else entries
+    }
 
     suspend fun getWeightData(dateRange: DateRange): List<Entry> {
         val (simple, days) = when (dateRange) {
@@ -25,7 +43,8 @@ class PlotsRepository @Inject constructor(
         }
         // Force non-lightweight for weight to ensure model series (W_obs/W_adj_pred) are populated
         val resp = plotsApiService.getWeightPlot(simple = false, days = days)
-          return resp.W_obs.map { Entry(toDaysSinceEpoch(it.time_index), it.value) }
+        val entries = resp.W_obs.map { Entry(toDaysSinceEpochFromAny(it.time_index), it.value) }
+        return dropIfConstant(entries) { it.y }
     }
 
     suspend fun getMetabolismData(dateRange: DateRange): List<Entry> {
@@ -36,7 +55,8 @@ class PlotsRepository @Inject constructor(
         }
         // Force non-lightweight for metabolism to ensure model series are populated
         val resp = plotsApiService.getMetabolismPlot(simple = false, days = days)
-          return resp.M_base.map { Entry(toDaysSinceEpoch(it.time_index), it.value) }
+        val entries = resp.M_base.map { Entry(toDaysSinceEpochFromAny(it.time_index), it.value) }
+        return dropIfConstant(entries) { it.y }
     }
 
     suspend fun getEnergyBalanceData(dateRange: DateRange): List<Entry> {
@@ -47,6 +67,6 @@ class PlotsRepository @Inject constructor(
         }
         // Prefer full path as well to keep consistency; backend falls back efficiently if needed
         val resp = plotsApiService.getEnergyBalancePlot(simple = false, days = days)
-          return resp.calories_unnorm.map { Entry(toDaysSinceEpoch(it.time_index), it.value) }
+        return resp.calories_unnorm.map { Entry(toDaysSinceEpochFromAny(it.time_index), it.value) }
     }
 }
