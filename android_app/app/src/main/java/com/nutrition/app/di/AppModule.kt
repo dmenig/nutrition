@@ -94,9 +94,9 @@ object AppModule {
         return OkHttpClient.Builder()
             .addInterceptor(logging)
             .addInterceptor(ErrorReportingInterceptor())
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .callTimeout(90, TimeUnit.SECONDS)
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            // No overall call timeout to allow slow cold starts on server
             .dns(ipv4OnlyDns)
             .retryOnConnectionFailure(true)
             .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
