@@ -460,6 +460,9 @@ def get_plot_data(prefer_lightweight: bool = False, last_n: int | None = None):
     # - Lightweight: skip heavy model path to reduce latency on mobile
     if prefer_lightweight:
         df = _load_results_csv()
+        # Even in lightweight mode, try the model path if CSV is missing to avoid empty plots
+        if df.empty:
+            df = _build_from_features_with_model()
         if df.empty:
             df = _build_from_daily_summaries()
         if df.empty:
