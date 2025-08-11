@@ -268,6 +268,38 @@ def train_and_save_model(
     torch.save(model.state_dict(), model_save_path)
     print(f"Model state dictionary saved to {model_save_path}.")
 
+    # Also export a lightweight NumPy weights file for torch-free inference
+    try:
+        import numpy as np
+        npz_path = os.path.join(os.path.dirname(model_save_path), "recurrent_model_np.npz")
+        # Collect state dict tensors into numpy arrays with stable names
+        sd = model.state_dict()
+        np.savez(
+            npz_path,
+            **{
+                "gru.weight_ih_l0": sd.get("gru.weight_ih_l0", torch.empty(0)).cpu().numpy(),
+                "gru.weight_hh_l0": sd.get("gru.weight_hh_l0", torch.empty(0)).cpu().numpy(),
+                "gru.bias_ih_l0": sd.get("gru.bias_ih_l0", torch.empty(0)).cpu().numpy(),
+                "gru.bias_hh_l0": sd.get("gru.bias_hh_l0", torch.empty(0)).cpu().numpy(),
+                # Optional second layer
+                "gru.weight_ih_l1": sd.get("gru.weight_ih_l1", torch.empty(0)).cpu().numpy(),
+                "gru.weight_hh_l1": sd.get("gru.weight_hh_l1", torch.empty(0)).cpu().numpy(),
+                "gru.bias_ih_l1": sd.get("gru.bias_ih_l1", torch.empty(0)).cpu().numpy(),
+                "gru.bias_hh_l1": sd.get("gru.bias_hh_l1", torch.empty(0)).cpu().numpy(),
+                # Head
+                "head.0.weight": sd.get("metabolism_increment_head.0.weight").cpu().numpy(),
+                "head.0.bias": sd.get("metabolism_increment_head.0.bias").cpu().numpy(),
+                "head.2.weight": sd.get("metabolism_increment_head.2.weight").cpu().numpy(),
+                "head.2.bias": sd.get("metabolism_increment_head.2.bias").cpu().numpy(),
+                # Scalars
+                "initial_metabolism": sd.get("initial_metabolism").cpu().numpy(),
+                "initial_adj_weight": sd.get("initial_adj_weight").cpu().numpy(),
+            }
+        )
+        print(f"Exported numpy weights to {npz_path}")
+    except Exception as _e:
+        print(f"Warning: failed to export numpy weights: {_e}")
+
     print(f"Attempting to save parameters to {params_save_path}...")
     with open(params_save_path, "w") as f:
         json.dump(

@@ -1,3 +1,12 @@
+# Set low-memory/thread env before importing libraries that may initialize BLAS backends
+import os as _early_os
+_early_os.environ.setdefault("OMP_NUM_THREADS", "1")
+_early_os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+_early_os.environ.setdefault("MKL_NUM_THREADS", "1")
+_early_os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+_early_os.environ.setdefault("MKL_THREADING_LAYER", "SEQUENTIAL")
+_early_os.environ.setdefault("MALLOC_ARENA_MAX", "2")
+
 from fastapi import FastAPI, Depends, HTTPException, status, Request
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
@@ -23,8 +32,8 @@ import json
 import os
 from typing import Any
 from fastapi import BackgroundTasks
-import torch
-from train_model import FinalModel, reconstruct_trajectory  # Import the model and trajectory util
+import gc
+# Defer heavy imports from `train_model` until needed to keep memory/CPU footprint low
 import json  # Added import for json
 import pathlib
 from sqlalchemy import func
@@ -48,12 +57,15 @@ app.include_router(foods.router, prefix="", tags=["foods"])
 
 class PredictionService:
     model: Any = None
+    np_model: Any = None
     model_path: str = "models/recurrent_model.pth"
     params_path: str = "models/best_params.json"
+    npz_path: str = "models/recurrent_model_np.npz"
     normalization_stats: dict = {}  # Initialize normalization_stats
 
     def __init__(self):
-        self.load_model()
+        # Lazy-load the model to avoid importing torch until needed
+        pass
 
     def _resolve_first_existing(self, candidates):
         for path in candidates:
@@ -62,6 +74,23 @@ class PredictionService:
         return candidates[0]
 
     def load_model(self):
+        # Import torch lazily to avoid loading it until strictly necessary
+        import os as _os
+        # Ensure CPU backends use a single thread to reduce memory/threads
+        _os.environ.setdefault("OMP_NUM_THREADS", "1")
+        _os.environ.setdefault("MKL_NUM_THREADS", "1")
+        _os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+        import torch  # noqa: WPS433 (local import by design)
+        import torch.nn as nn  # noqa: WPS433
+        try:
+            from train_model import FinalModel  # noqa: WPS433
+        except Exception as exc:
+            raise RuntimeError(f"Unable to import model definition: {exc}")
+        torch.set_num_threads(1)
+        try:
+            torch.set_num_interop_threads(1)
+        except Exception:
+            pass
         # Load normalization stats and initial weight guess from best_params.json
         try:
             params_path = self._resolve_first_existing(
@@ -122,15 +151,51 @@ class PredictionService:
                     self.model = loaded
                 except Exception as e:
                     raise RuntimeError(f"Failed to load model weights from {model_path}: {e}")
-        self.model.eval()  # Set model to evaluation mode
+        # Ensure model is on CPU and in eval mode
+        self.model.eval()
+        # Apply dynamic quantization for minimal CPU memory footprint
+        try:
+            try:
+                quantize_dynamic = torch.quantization.quantize_dynamic
+            except Exception:
+                from torch.ao.quantization import quantize_dynamic  # type: ignore
+            self.model = quantize_dynamic(self.model, {nn.Linear, nn.GRU}, dtype=torch.qint8)
+        except Exception:
+            pass
+        # Best-effort cleanup of loader temp objects
+        del loaded
+        gc.collect()
         print(f"Model loaded successfully from {self.model_path}")
 
     def predict(self, data: pd.DataFrame):
+        # Prefer numpy inference path if weights are available
+        if self.np_model is None and os.path.exists(self.npz_path):
+            try:
+                from app.np_infer import load_numpy_weights, NumpyFinalModel  # noqa: WPS433
+                weights = load_numpy_weights(self.npz_path)
+                # Infer architecture sizes from saved shapes
+                head_w = weights.get("head.0.weight")
+                gru_w = weights.get("gru.weight_hh_l0")
+                if head_w is None or gru_w is None:
+                    raise RuntimeError("NP weights missing required tensors")
+                hidden_size = gru_w.shape[1]
+                input_size = head_w.shape[1] - hidden_size
+                num_layers = sum(1 for k in weights.keys() if k.startswith("gru.weight_ih_l"))
+                self.np_model = NumpyFinalModel(weights, input_size, hidden_size, num_layers)
+            except Exception:
+                self.np_model = None
+        # If numpy path is present, avoid importing torch entirely
+        if self.np_model is None:
+            # Import torch lazily
+            import torch  # noqa: WPS433
+        else:
+            torch = None  # type: ignore
         if self.model is None:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Prediction model not loaded.",
-            )
+            if torch is None:
+                # We will use numpy-only path; no torch load
+                pass
+            else:
+                self.load_model()
         # Assuming the input data needs to be converted to a tensor and normalized
         # This part needs to be aligned with how the model expects its input during prediction
         # For now, a placeholder for prediction.
@@ -157,19 +222,40 @@ class PredictionService:
                 normalized_data[col] = (
                     normalized_data[col] - self.normalization_stats[col]["mean"]
                 )
-        nutrition_tensor = torch.tensor(
-            normalized_data.values, dtype=torch.float32
-        ).unsqueeze(0)
-        with torch.no_grad():
-            base_metabolisms = self.model(nutrition_tensor)
+        features = normalized_data.values.astype("float32")[None, :, :]
+        if self.np_model is not None:
+            base_metabolisms = self.np_model.forward(features)
             return base_metabolisms.squeeze().tolist()
+        else:
+            nutrition_tensor = torch.tensor(features, dtype=torch.float32)
+            with torch.inference_mode():
+                base_metabolisms = self.model(nutrition_tensor)
+                return base_metabolisms.squeeze().tolist()
 
     def predict_from_features(self, features_df: pd.DataFrame):
+        # Prefer numpy inference path if available
+        using_numpy = False
+        if self.np_model is None and os.path.exists(self.npz_path):
+            try:
+                from app.np_infer import load_numpy_weights, NumpyFinalModel, reconstruct_trajectory_numpy  # noqa: WPS433
+                weights = load_numpy_weights(self.npz_path)
+                gru_w = weights.get("gru.weight_hh_l0")
+                head_w = weights.get("head.0.weight")
+                hidden_size = gru_w.shape[1]
+                input_size = head_w.shape[1] - hidden_size
+                num_layers = sum(1 for k in weights.keys() if k.startswith("gru.weight_ih_l"))
+                self.np_model = NumpyFinalModel(weights, input_size, hidden_size, num_layers)
+                using_numpy = True
+            except Exception:
+                self.np_model = None
+                using_numpy = False
+        if not using_numpy:
+            import torch  # noqa: WPS433
         if self.model is None:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Prediction model not loaded.",
-            )
+            if using_numpy:
+                pass
+            else:
+                self.load_model()
         # Ensure required columns and numeric types
         nutrition_cols = ["calories", "carbs", "sugar", "sel", "alcool", "water"]
         required_cols = nutrition_cols + ["sport", "pds"]
@@ -190,28 +276,56 @@ class PredictionService:
         norm_df["pds_normalized"] = norm_df["pds"] - weight_mean
 
         # Tensors
-        observed_weights = torch.tensor(
-            norm_df["pds_normalized"].values, dtype=torch.float32
-        ).unsqueeze(0)
-        nutrition_tensor = torch.tensor(
-            norm_df[nutrition_cols].values, dtype=torch.float32
-        ).unsqueeze(0)
-        sport_tensor = torch.tensor(norm_df["sport"].values, dtype=torch.float32).unsqueeze(0)
-
-        with torch.no_grad():
-            base_metabolisms = self.model(nutrition_tensor)
-            predicted_observed_weight, w_adj_pred = reconstruct_trajectory(
-                observed_weights,
+        if using_numpy and self.np_model is not None:
+            obs_np = norm_df["pds_normalized"].values.astype("float32")[None, :]
+            nut_np = norm_df[nutrition_cols].values.astype("float32")[None, :, :]
+            sport_np = norm_df["sport"].values.astype("float32")[None, :]
+            base_metabolisms = self.np_model.forward(nut_np)
+            from app.np_infer import reconstruct_trajectory_numpy  # noqa: WPS433
+            predicted_observed_weight, w_adj_pred = reconstruct_trajectory_numpy(
+                obs_np,
                 base_metabolisms,
-                nutrition_tensor,
-                sport_tensor,
-                self.model.initial_adj_weight,
+                nut_np,
+                sport_np,
+                float(self.np_model.initial_adj_weight),
                 self.normalization_stats,
             )
+        else:
+            import torch  # noqa: WPS433
+            observed_weights = torch.tensor(
+                norm_df["pds_normalized"].values, dtype=torch.float32
+            ).unsqueeze(0)
+            nutrition_tensor = torch.tensor(
+                norm_df[nutrition_cols].values, dtype=torch.float32
+            ).unsqueeze(0)
+            sport_tensor = torch.tensor(norm_df["sport"].values, dtype=torch.float32).unsqueeze(0)
+
+            with torch.inference_mode():
+                base_metabolisms = self.model(nutrition_tensor)
+                from train_model import reconstruct_trajectory  # noqa: WPS433
+                predicted_observed_weight, w_adj_pred = reconstruct_trajectory(
+                    observed_weights,
+                    base_metabolisms,
+                    nutrition_tensor,
+                    sport_tensor,
+                    self.model.initial_adj_weight,
+                    self.normalization_stats,
+                )
+            # Free temporaries aggressively
+            del observed_weights, nutrition_tensor, sport_tensor, base_metabolisms, predicted_observed_weight
+            gc.collect()
 
         # De-normalize outputs
-        base_metabolisms_kcal = base_metabolisms.squeeze().cpu().numpy() * 1000.0
-        w_adj_pred_actual = w_adj_pred.squeeze().cpu().numpy() + weight_mean
+        # Convert results to numpy uniformly
+        import numpy as _np
+        base_metabolisms_np = (
+            base_metabolisms.squeeze() if isinstance(base_metabolisms, _np.ndarray) else base_metabolisms.squeeze().cpu().numpy()
+        )
+        w_adj_np = (
+            w_adj_pred.squeeze() if isinstance(w_adj_pred, _np.ndarray) else w_adj_pred.squeeze().cpu().numpy()
+        )
+        base_metabolisms_kcal = base_metabolisms_np * 1000.0
+        w_adj_pred_actual = w_adj_np + weight_mean
         actual_weight = features_df["pds"].values
         water_retention = actual_weight - w_adj_pred_actual
 
@@ -233,7 +347,8 @@ prediction_service = PredictionService()
 
 @app.on_event("startup")
 async def startup_event():
-    prediction_service.load_model()
+    # Do not eagerly load the model on startup to keep memory minimal until needed
+    return None
 
 
 @app.get("/api/v1/predict/latest", tags=["prediction"])
