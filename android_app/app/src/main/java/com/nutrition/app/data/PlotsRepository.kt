@@ -23,7 +23,8 @@ class PlotsRepository @Inject constructor(
             DateRange.MONTH -> true to 30
             DateRange.YEAR -> true to 365
         }
-        val resp = plotsApiService.getWeightPlot(simple = simple, days = days)
+        // Force non-lightweight for weight to ensure model series (W_obs/W_adj_pred) are populated
+        val resp = plotsApiService.getWeightPlot(simple = false, days = days)
           return resp.W_obs.map { Entry(toDaysSinceEpoch(it.time_index), it.value) }
     }
 
@@ -33,7 +34,8 @@ class PlotsRepository @Inject constructor(
             DateRange.MONTH -> true to 30
             DateRange.YEAR -> true to 365
         }
-        val resp = plotsApiService.getMetabolismPlot(simple = simple, days = days)
+        // Force non-lightweight for metabolism to ensure model series are populated
+        val resp = plotsApiService.getMetabolismPlot(simple = false, days = days)
           return resp.M_base.map { Entry(toDaysSinceEpoch(it.time_index), it.value) }
     }
 
@@ -43,7 +45,8 @@ class PlotsRepository @Inject constructor(
             DateRange.MONTH -> true to 30
             DateRange.YEAR -> true to 365
         }
-        val resp = plotsApiService.getEnergyBalancePlot(simple = simple, days = days)
+        // Prefer full path as well to keep consistency; backend falls back efficiently if needed
+        val resp = plotsApiService.getEnergyBalancePlot(simple = false, days = days)
           return resp.calories_unnorm.map { Entry(toDaysSinceEpoch(it.time_index), it.value) }
     }
 }
