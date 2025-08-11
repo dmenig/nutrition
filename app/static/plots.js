@@ -15,7 +15,7 @@ function toSeriesXY(series) {
 }
 
 async function renderWeightChart(chart, range) {
-  const data = await fetchJSON('/api/v1/plots/weight');
+  const data = await fetchJSON('/api/v1/plots/weight?simple=false');
   const wObs = sliceRange(toSeriesXY(data.W_obs), range);
   const wAdj = sliceRange(toSeriesXY(data.W_adj_pred), range);
   chart.setOption({
@@ -31,7 +31,7 @@ async function renderWeightChart(chart, range) {
 }
 
 async function renderMetabolismChart(chart, range) {
-  const data = await fetchJSON('/api/v1/plots/metabolism');
+  const data = await fetchJSON('/api/v1/plots/metabolism?simple=false');
   const mBase = sliceRange(toSeriesXY(data.M_base), range);
   chart.setOption({
     tooltip: { trigger: 'axis' },
@@ -43,7 +43,7 @@ async function renderMetabolismChart(chart, range) {
 }
 
 async function renderEnergyChart(chart, range) {
-  const data = await fetchJSON('/api/v1/plots/energy-balance');
+  const data = await fetchJSON('/api/v1/plots/energy-balance?simple=false');
   const cal = sliceRange(toSeriesXY(data.calories_unnorm), range);
   const exp = sliceRange(toSeriesXY(data.C_exp_t), range);
   chart.setOption({
