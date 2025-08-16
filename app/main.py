@@ -816,12 +816,12 @@ def get_weight_plot_data(days: int | None = None):
     w_obs = [
         {"time_index": row["time_index"], "value": float(row["W_obs"])}
         for _, row in df.iterrows()
-        if pd.notnull(row.get("W_obs")) and float(row["W_obs"]) > 0.0
+        if pd.notnull(row.get("W_obs"))
     ]
     w_adj = [
         {"time_index": row["time_index"], "value": float(row["W_adj_pred"])}
         for _, row in df.iterrows()
-        if pd.notnull(row.get("W_adj_pred")) and float(row["W_adj_pred"]) > 0.0
+        if pd.notnull(row.get("W_adj_pred"))
     ]
     return WeightPlotResponse(W_obs=w_obs, W_adj_pred=w_adj)
 
