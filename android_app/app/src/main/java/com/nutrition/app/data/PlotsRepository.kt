@@ -32,36 +32,32 @@ class PlotsRepository @Inject constructor(
     
 
     suspend fun getWeightData(dateRange: DateRange): List<Entry> {
-        val (simple, days) = when (dateRange) {
-            DateRange.WEEK -> true to 7
-            DateRange.MONTH -> true to 30
-            DateRange.YEAR -> true to 365
+        val days = when (dateRange) {
+            DateRange.WEEK -> 7
+            DateRange.MONTH -> 30
+            DateRange.YEAR -> 365
         }
-        // Force non-lightweight for weight to ensure model series (W_obs/W_adj_pred) are populated
-        // Always use full model output from the backend
-        val resp = plotsApiService.getWeightPlot(simple = false, days = days)
+        val resp = plotsApiService.getWeightPlot(days = days)
         return resp.W_obs.map { Entry(toDaysSinceEpochFromAny(it.time_index), it.value) }
     }
 
     suspend fun getMetabolismData(dateRange: DateRange): List<Entry> {
-        val (simple, days) = when (dateRange) {
-            DateRange.WEEK -> true to 7
-            DateRange.MONTH -> true to 30
-            DateRange.YEAR -> true to 365
+        val days = when (dateRange) {
+            DateRange.WEEK -> 7
+            DateRange.MONTH -> 30
+            DateRange.YEAR -> 365
         }
-        // Force non-lightweight for metabolism to ensure model series are populated
-        val resp = plotsApiService.getMetabolismPlot(simple = false, days = days)
+        val resp = plotsApiService.getMetabolismPlot(days = days)
         return resp.M_base.map { Entry(toDaysSinceEpochFromAny(it.time_index), it.value) }
     }
 
     suspend fun getEnergyBalanceData(dateRange: DateRange): List<Entry> {
-        val (simple, days) = when (dateRange) {
-            DateRange.WEEK -> true to 7
-            DateRange.MONTH -> true to 30
-            DateRange.YEAR -> true to 365
+        val days = when (dateRange) {
+            DateRange.WEEK -> 7
+            DateRange.MONTH -> 30
+            DateRange.YEAR -> 365
         }
-        // Prefer full path as well to keep consistency; backend falls back efficiently if needed
-        val resp = plotsApiService.getEnergyBalancePlot(simple = false, days = days)
+        val resp = plotsApiService.getEnergyBalancePlot(days = days)
         return resp.calories_unnorm.map { Entry(toDaysSinceEpochFromAny(it.time_index), it.value) }
     }
 }
