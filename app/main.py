@@ -167,6 +167,38 @@ class PredictionService:
         gc.collect()
         print(f"Model loaded successfully from {self.model_path}")
 
+    def _ensure_normalization_stats_loaded(self) -> None:
+        """Load normalization stats from best_params.json if not already loaded.
+
+        This is required for both torch and numpy inference paths. On Render, we
+        often prefer the numpy path to avoid torch imports; in that case this
+        helper ensures self.normalization_stats is populated.
+        """
+        # If already loaded, nothing to do
+        if isinstance(self.normalization_stats, dict) and self.normalization_stats:
+            return
+        params_candidates = [
+            self.params_path,
+            "/app/best_params.json",
+            "/app/models/best_params.json",
+        ]
+        params_path = next((p for p in params_candidates if os.path.exists(p)), None)
+        if params_path is not None:
+            try:
+                with open(params_path, "r") as f:
+                    params = json.load(f)
+                    self.normalization_stats = params.get("normalization", {})
+            except Exception:
+                # Fall back to identity stats below
+                self.normalization_stats = {}
+        # Ensure required keys exist with identity transforms
+        for key in ["calories", "carbs", "sugar", "sel", "alcool", "water", "sport"]:
+            if key not in self.normalization_stats:
+                self.normalization_stats[key] = {"mean": 0.0, "std": 1.0}
+        if "pds" not in self.normalization_stats:
+            # Use neutral mean; model initial weight handles absolute scale
+            self.normalization_stats["pds"] = {"mean": 0.0}
+
     def predict(self, data: pd.DataFrame):
         # Prefer numpy inference path if weights are available
         if self.np_model is None and os.path.exists(self.npz_path):
@@ -249,6 +281,8 @@ class PredictionService:
             except Exception:
                 self.np_model = None
                 using_numpy = False
+        # Ensure normalization params are loaded regardless of path
+        self._ensure_normalization_stats_loaded()
         if not using_numpy:
             import torch  # noqa: WPS433
         if self.model is None:
