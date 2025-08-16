@@ -306,7 +306,7 @@ class PredictionService:
                 std = self.normalization_stats[col]["std"] or 1.0
                 norm_df[col] = (norm_df[col] - mean) / std
 
-        weight_mean = self.normalization_stats.get("pds", {}).get("mean", 0.0)
+        weight_mean = float(self.normalization_stats.get("pds", {}).get("mean", 0.0) or 0.0)
         norm_df["pds_normalized"] = norm_df["pds"] - weight_mean
 
         # Tensors

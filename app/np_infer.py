@@ -23,8 +23,21 @@ class NumpyFinalModel:
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.num_layers = num_layers
-        self.initial_metabolism = float(weights.get("initial_metabolism", 2.5))
-        self.initial_adj_weight = float(weights.get("initial_adj_weight", 70.0))
+        # Coerce scalar parameters from arrays; apply sane defaults if missing/empty
+        init_met = weights.get("initial_metabolism", None)
+        if isinstance(init_met, np.ndarray) and init_met.size > 0:
+            self.initial_metabolism = float(init_met.reshape(-1)[0])
+        elif isinstance(init_met, (float, int)):
+            self.initial_metabolism = float(init_met)
+        else:
+            self.initial_metabolism = 2.5
+        init_w = weights.get("initial_adj_weight", None)
+        if isinstance(init_w, np.ndarray) and init_w.size > 0:
+            self.initial_adj_weight = float(init_w.reshape(-1)[0])
+        elif isinstance(init_w, (float, int)):
+            self.initial_adj_weight = float(init_w)
+        else:
+            self.initial_adj_weight = 70.0
 
     def _gru_layer_forward(self, x_seq: np.ndarray, layer_idx: int) -> np.ndarray:
         # x_seq: [seq_len, input_dim]
