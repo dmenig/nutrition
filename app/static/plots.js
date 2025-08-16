@@ -11,7 +11,13 @@ async function fetchJSON(url) {
 }
 
 function toSeriesXY(series) {
-  return series.map((p) => [p.time_index, p.value]);
+  return series.map((p) => {
+    const t = Number(p.time_index);
+    // Normalize to milliseconds: ECharts expects ms. If backend sent seconds,
+    // values will be ~1e9; convert to ms. If already ms (~1e12+), keep as-is.
+    const ms = t < 1e12 ? t * 1000 : t;
+    return [ms, p.value];
+  });
 }
 
 async function renderWeightChart(chart, range) {

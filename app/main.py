@@ -31,6 +31,7 @@ import pandas as pd
 import json
 import os
 from typing import Any
+from threading import Lock, Thread
 from fastapi import BackgroundTasks
 import gc
 # Defer heavy imports from `train_model` until needed to keep memory/CPU footprint low
@@ -379,9 +380,27 @@ def health_check():
 prediction_service = PredictionService()
 
 
+# In-memory plot cache (full DataFrame, sliced per request)
+_PLOT_CACHE_LOCK: Lock = Lock()
+_PLOT_CACHE_DF: pd.DataFrame | None = None
+
+
 @app.on_event("startup")
 async def startup_event():
-    # Do not eagerly load the model on startup to keep memory minimal until needed
+    # Warm the plot cache in the background so first user hits are fast
+    def _warm_cache() -> None:
+        try:
+            # Compute once; get_plot_data will populate the cache
+            _ = get_plot_data(last_n=None)
+        except Exception:
+            # Best effort; failures are non-fatal
+            pass
+
+    try:
+        t = Thread(target=_warm_cache, daemon=True)
+        t.start()
+    except Exception:
+        pass
     return None
 
 
@@ -471,6 +490,20 @@ def get_plot_data(last_n: int | None = None):
         "calories",
         "sport",
     ]
+
+    # Serve from cache if available
+    global _PLOT_CACHE_DF
+    try:
+        with _PLOT_CACHE_LOCK:
+            cached_df = _PLOT_CACHE_DF
+        if cached_df is not None and not cached_df.empty:
+            df = cached_df
+            if isinstance(last_n, int) and last_n > 0 and len(df) > last_n:
+                return df.tail(last_n).reset_index(drop=True)
+            return df
+    except Exception:
+        # On any cache access issue, fall back to recompute
+        pass
 
     def _build_from_daily_summaries() -> pd.DataFrame:
         db = SessionLocal()
@@ -688,7 +721,14 @@ def get_plot_data(last_n: int | None = None):
     # Ensure sorted by time for slicing
     if "time_index" in df.columns:
         df = df.sort_values(by=["time_index"]).reset_index(drop=True)
-    # Optional slicing to last N days/points
+    # Populate cache with the full DataFrame before any slicing
+    try:
+        with _PLOT_CACHE_LOCK:
+            _PLOT_CACHE_DF = df.copy()
+    except Exception:
+        pass
+
+    # Optional slicing to last N days/points for this response
     if isinstance(last_n, int) and last_n > 0 and len(df) > last_n:
         df = df.tail(last_n).reset_index(drop=True)
     return df
@@ -950,60 +990,17 @@ def plots_page(request: Request):
 # Optional admin utility to (re)build plot data on-demand in deployed envs
 @app.post("/api/v1/plots/rebuild", tags=["plots"])
 def rebuild_plots_data():
+    """Recompute plot data once and refresh the in-memory cache."""
+    global _PLOT_CACHE_DF
     try:
-        # Try to build from features; if empty, just touch an empty CSV with headers
-        df = get_plot_data()
-        # If data is empty, try increasingly robust fallbacks to write a non-empty CSV
-        if df.empty:
-            # 1) Attempt full features rebuild via build_features
-            try:
-                from build_features import main as build_features_main
-
-                features_df = build_features_main(
-                    journal_path="data/processed_journal.csv",
-                    variables_path="data/variables.csv",
-                )
-            except Exception:
-                features_df = None
-
-            if features_df is not None and not features_df.empty:
-                out = pd.DataFrame()
-                out["W_obs"] = pd.to_numeric(features_df.get("pds", 0), errors="coerce").fillna(0)
-                out["W_adj_pred"] = out["W_obs"].rolling(window=7, min_periods=1).mean().astype(float)
-                out["M_base"] = 2500.0
-                out["calories"] = pd.to_numeric(features_df.get("calories", 0), errors="coerce").fillna(0)
-                out["sport"] = pd.to_numeric(features_df.get("sport", 0), errors="coerce").fillna(0)
-                out.to_csv("data/final_results.csv", index=False)
-                return {"status": "ok"}
-
-            # 2) Fallback: use packaged data/features.csv directly if present
-            try:
-                if os.path.exists("data/features.csv"):
-                    features_df = pd.read_csv("data/features.csv")
-                else:
-                    features_df = None
-            except Exception:
-                features_df = None
-
-            if features_df is not None and not features_df.empty:
-                out = pd.DataFrame()
-                out["W_obs"] = pd.to_numeric(features_df.get("pds", 0), errors="coerce").fillna(0)
-                out["W_adj_pred"] = out["W_obs"].rolling(window=7, min_periods=1).mean().astype(float)
-                out["M_base"] = 2500.0
-                out["calories"] = pd.to_numeric(features_df.get("calories", 0), errors="coerce").fillna(0)
-                out["sport"] = pd.to_numeric(features_df.get("sport", 0), errors="coerce").fillna(0)
-                out.to_csv("data/final_results.csv", index=False)
-                return {"status": "ok"}
-
-            # 3) Last resort: synthesize a small non-empty dataset
-            n_days = 30
-            out = pd.DataFrame()
-            out["W_obs"] = pd.Series([70.0 + (i % 5) * 0.1 for i in range(n_days)], dtype=float)
-            out["W_adj_pred"] = out["W_obs"].rolling(window=7, min_periods=1).mean().astype(float)
-            out["M_base"] = 2500.0
-            out["calories"] = 2200.0
-            out["sport"] = 300.0
-            out.to_csv("data/final_results.csv", index=False)
-        return {"status": "ok"}
+        # Clear and rebuild cache
+        try:
+            with _PLOT_CACHE_LOCK:
+                _PLOT_CACHE_DF = None
+        except Exception:
+            pass
+        df = get_plot_data(last_n=None)
+        rows = int(len(df))
+        return {"status": "ok", "rows": rows}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to rebuild plots data: {e}")

@@ -5,6 +5,7 @@ import re
 import ast
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine, text
+from typing import List, Tuple, Optional
 from utils import SafeFormulaEvaluator, SafeSportFormulaEvaluator, normalize_food_names
 from app.db.models import Base, Food, FoodLog, User, SportActivity
 from app.core.config import settings
@@ -294,7 +295,7 @@ def verify_population():
         print(f"Rows in food_logs: {food_log_count}")
         print(f"Rows in sport_activities: {sport_count}")
 
-def _extract_sport_calls_with_calories(expr_eval: str) -> list[tuple[str, int, float, float | None, float | None]]:
+def _extract_sport_calls_with_calories(expr_eval: str) -> List[Tuple[str, int, float, Optional[float], Optional[float]]]:
     """
     Finds every whitelisted sport function call in the expression and returns a list of
     tuples: (activity_name, duration_minutes, calories_for_that_call, carried_weight_kg, distance_m).
@@ -321,7 +322,7 @@ def _extract_sport_calls_with_calories(expr_eval: str) -> list[tuple[str, int, f
         return []
 
     evaluator = SafeSportFormulaEvaluator(SPORT_FUNCTIONS)
-    calls: list[tuple[str, int, float, float | None, float | None]] = []
+    calls: List[Tuple[str, int, float, Optional[float], Optional[float]]] = []
 
     def is_pure_numeric(node: ast.AST) -> bool:
         try:
