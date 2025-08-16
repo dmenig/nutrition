@@ -75,98 +75,51 @@ class PredictionService:
         return candidates[0]
 
     def load_model(self):
-        # Import torch lazily to avoid loading it until strictly necessary
-        import os as _os
-        # Ensure CPU backends use a single thread to reduce memory/threads
-        _os.environ.setdefault("OMP_NUM_THREADS", "1")
-        _os.environ.setdefault("MKL_NUM_THREADS", "1")
-        _os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
-        import torch  # noqa: WPS433 (local import by design)
-        import torch.nn as nn  # noqa: WPS433
-        try:
-            from train_model import FinalModel  # noqa: WPS433
-        except Exception as exc:
-            raise RuntimeError(f"Unable to import model definition: {exc}")
-        torch.set_num_threads(1)
-        try:
-            torch.set_num_interop_threads(1)
-        except Exception:
-            pass
-        # Load normalization stats and initial weight guess from best_params.json
+        # NumPy-only deployment: load normalization stats if present; skip Torch entirely
         try:
             params_path = self._resolve_first_existing(
                 [self.params_path, "/app/best_params.json", "/app/models/best_params.json"]
             )
             with open(params_path, "r") as f:
                 params = json.load(f)
-                self.normalization_stats = params["normalization"]  # Store in self
-                # Assuming initial_weight_guess is part of normalization_stats or derived
-                # For now, we'll use a dummy value or derive it if needed.
-                # A more robust solution would save this with the model params.
-                # If 'pds' mean is available, we can use it as a proxy for initial_weight_guess
-                initial_weight_guess = (
-                    self.normalization_stats["pds"]["mean"]
-                    if "pds" in self.normalization_stats
-                    else 70.0
-                )  # Default if not found
-        except FileNotFoundError:
-            print(
-                f"Warning: {self.params_path} not found. Using default initial_weight_guess."
-            )
-            initial_weight_guess = 70.0  # Fallback default
-        except json.JSONDecodeError:
-            print(
-                f"Warning: Could not decode JSON from {self.params_path}. Using default initial_weight_guess."
-            )
-            initial_weight_guess = 70.0  # Fallback default
-
-        # Instantiate the model with appropriate parameters
-        # Assuming nutrition_input_size can be inferred or is a fixed value
-        # For now, let's use a placeholder. This needs to match the training model.
-        # From train_model.py, nutrition_input_size is nutrition_data.shape[2]
-        # which is len(nutrition_cols) = 6.
-        nutrition_input_size = 6
-        self.model = FinalModel(nutrition_input_size, initial_weight_guess)
-
-        # Load weights from known locations
-        model_path = self._resolve_first_existing(
-            [
-                self.model_path,
-                "/app/recurrent_model.pth",
-                "/app/models/recurrent_model.pth",
-                "models/model.pkl",
-                "/app/models/model.pkl",
-            ]
-        )
-        loaded = torch.load(model_path, map_location=torch.device("cpu"))
-        try:
-            # Assume state dict
-            self.model.load_state_dict(loaded)
+                self.normalization_stats = params.get("normalization", {})
         except Exception:
-            # Fallback: maybe a dict wrapper
-            if isinstance(loaded, dict) and "state_dict" in loaded:
-                self.model.load_state_dict(loaded["state_dict"])
-            else:
-                # As a last resort, try loading a full pickled nn.Module
-                try:
-                    self.model = loaded
-                except Exception as e:
-                    raise RuntimeError(f"Failed to load model weights from {model_path}: {e}")
-        # Ensure model is on CPU and in eval mode
-        self.model.eval()
-        # Apply dynamic quantization for minimal CPU memory footprint
+            # Keep defaults; identity normalization will be used
+            self.normalization_stats = {}
+        print("NumPy-only deployment: load_model skipped Torch load.")
+
+    def _export_numpy_weights(self, npz_out_path: str) -> None:
+        # NumPy-only deployment: exporting from Torch is disabled
+        return
+
+    def _should_use_numpy(self) -> bool:
+        """Return True if NumPy backend should be used based on env and file mtimes.
+
+        - PREDICT_BACKEND=torch forces Torch
+        - PREDICT_BACKEND=numpy forces NumPy (if file exists)
+        - Otherwise, prefer NumPy only if the .npz exists and is at least as new as the .pth
+        """
+        backend = os.environ.get("PREDICT_BACKEND", "auto").lower()
+        if backend == "torch":
+            return False
+        if not os.path.exists(self.npz_path):
+            return False
+        if backend == "numpy":
+            return True
+        # Compare mtimes: use numpy only if npz is >= pth
+        pth_candidates = [
+            self.model_path,
+            "/app/recurrent_model.pth",
+            "/app/models/recurrent_model.pth",
+        ]
+        pth_path = next((p for p in pth_candidates if os.path.exists(p)), None)
         try:
-            try:
-                quantize_dynamic = torch.quantization.quantize_dynamic
-            except Exception:
-                from torch.ao.quantization import quantize_dynamic  # type: ignore
-            self.model = quantize_dynamic(self.model, {nn.Linear, nn.GRU}, dtype=torch.qint8)
+            if pth_path is not None:
+                return os.path.getmtime(self.npz_path) >= os.path.getmtime(pth_path)
         except Exception:
             pass
-        # Best-effort cleanup of loader temp objects
-        del loaded
-        gc.collect()
-        print(f"Model loaded successfully from {self.model_path}")
+        # If we cannot compare, default to NumPy since file exists
+        return True
 
     def _ensure_normalization_stats_loaded(self) -> None:
         """Load normalization stats from best_params.json if not already loaded.
@@ -201,34 +154,19 @@ class PredictionService:
             self.normalization_stats["pds"] = {"mean": 70.0}
 
     def predict(self, data: pd.DataFrame):
-        # Prefer numpy inference path if weights are available
-        if self.np_model is None and os.path.exists(self.npz_path):
-            try:
-                from app.np_infer import load_numpy_weights, NumpyFinalModel  # noqa: WPS433
-                weights = load_numpy_weights(self.npz_path)
-                # Infer architecture sizes from saved shapes
-                head_w = weights.get("head.0.weight")
-                gru_w = weights.get("gru.weight_hh_l0")
-                if head_w is None or gru_w is None:
-                    raise RuntimeError("NP weights missing required tensors")
-                hidden_size = gru_w.shape[1]
-                input_size = head_w.shape[1] - hidden_size
-                num_layers = sum(1 for k in weights.keys() if k.startswith("gru.weight_ih_l"))
-                self.np_model = NumpyFinalModel(weights, input_size, hidden_size, num_layers)
-            except Exception:
-                self.np_model = None
-        # If numpy path is present, avoid importing torch entirely
+        # NumPy-only inference
         if self.np_model is None:
-            # Import torch lazily
-            import torch  # noqa: WPS433
-        else:
-            torch = None  # type: ignore
-        if self.model is None:
-            if torch is None:
-                # We will use numpy-only path; no torch load
-                pass
-            else:
-                self.load_model()
+            from app.np_infer import load_numpy_weights, NumpyFinalModel  # noqa: WPS433
+            weights = load_numpy_weights(self.npz_path)
+            # Infer architecture sizes from saved shapes
+            head_w = weights.get("head.0.weight")
+            gru_w = weights.get("gru.weight_hh_l0")
+            if head_w is None or gru_w is None:
+                raise RuntimeError("NP weights missing required tensors")
+            hidden_size = gru_w.shape[1]
+            input_size = head_w.shape[1] - hidden_size
+            num_layers = sum(1 for k in weights.keys() if k.startswith("gru.weight_ih_l"))
+            self.np_model = NumpyFinalModel(weights, input_size, hidden_size, num_layers)
         # Assuming the input data needs to be converted to a tensor and normalized
         # This part needs to be aligned with how the model expects its input during prediction
         # For now, a placeholder for prediction.
@@ -256,41 +194,22 @@ class PredictionService:
                     normalized_data[col] - self.normalization_stats[col]["mean"]
                 )
         features = normalized_data.values.astype("float32")[None, :, :]
-        if self.np_model is not None:
-            base_metabolisms = self.np_model.forward(features)
-            return base_metabolisms.squeeze().tolist()
-        else:
-            nutrition_tensor = torch.tensor(features, dtype=torch.float32)
-            with torch.inference_mode():
-                base_metabolisms = self.model(nutrition_tensor)
-                return base_metabolisms.squeeze().tolist()
+        base_metabolisms = self.np_model.forward(features)
+        return base_metabolisms.squeeze().tolist()
 
     def predict_from_features(self, features_df: pd.DataFrame):
-        # Prefer numpy inference path if available
-        using_numpy = False
-        if self.np_model is None and os.path.exists(self.npz_path):
-            try:
-                from app.np_infer import load_numpy_weights, NumpyFinalModel, reconstruct_trajectory_numpy  # noqa: WPS433
-                weights = load_numpy_weights(self.npz_path)
-                gru_w = weights.get("gru.weight_hh_l0")
-                head_w = weights.get("head.0.weight")
-                hidden_size = gru_w.shape[1]
-                input_size = head_w.shape[1] - hidden_size
-                num_layers = sum(1 for k in weights.keys() if k.startswith("gru.weight_ih_l"))
-                self.np_model = NumpyFinalModel(weights, input_size, hidden_size, num_layers)
-                using_numpy = True
-            except Exception:
-                self.np_model = None
-                using_numpy = False
-        # Ensure normalization params are loaded regardless of path
+        # NumPy-only inference
+        if self.np_model is None:
+            from app.np_infer import load_numpy_weights, NumpyFinalModel  # noqa: WPS433
+            weights = load_numpy_weights(self.npz_path)
+            gru_w = weights.get("gru.weight_hh_l0")
+            head_w = weights.get("head.0.weight")
+            hidden_size = gru_w.shape[1]
+            input_size = head_w.shape[1] - hidden_size
+            num_layers = sum(1 for k in weights.keys() if k.startswith("gru.weight_ih_l"))
+            self.np_model = NumpyFinalModel(weights, input_size, hidden_size, num_layers)
+        # Ensure normalization params are loaded
         self._ensure_normalization_stats_loaded()
-        if not using_numpy:
-            import torch  # noqa: WPS433
-        if self.model is None:
-            if using_numpy:
-                pass
-            else:
-                self.load_model()
         # Ensure required columns and numeric types
         nutrition_cols = ["calories", "carbs", "sugar", "sel", "alcool", "water"]
         required_cols = nutrition_cols + ["sport", "pds"]
@@ -310,8 +229,8 @@ class PredictionService:
         weight_mean = float(self.normalization_stats.get("pds", {}).get("mean", 0.0) or 0.0)
         norm_df["pds_normalized"] = norm_df["pds"] - weight_mean
 
-        # Tensors
-        if using_numpy and self.np_model is not None:
+        # NumPy path
+        if self.np_model is not None:
             obs_np = norm_df["pds_normalized"].values.astype("float32")[None, :]
             nut_np = norm_df[nutrition_cols].values.astype("float32")[None, :, :]
             sport_np = norm_df["sport"].values.astype("float32")[None, :]
@@ -326,39 +245,13 @@ class PredictionService:
                 self.normalization_stats,
             )
         else:
-            import torch  # noqa: WPS433
-            observed_weights = torch.tensor(
-                norm_df["pds_normalized"].values, dtype=torch.float32
-            ).unsqueeze(0)
-            nutrition_tensor = torch.tensor(
-                norm_df[nutrition_cols].values, dtype=torch.float32
-            ).unsqueeze(0)
-            sport_tensor = torch.tensor(norm_df["sport"].values, dtype=torch.float32).unsqueeze(0)
-
-            with torch.inference_mode():
-                base_metabolisms = self.model(nutrition_tensor)
-                from train_model import reconstruct_trajectory  # noqa: WPS433
-                predicted_observed_weight, w_adj_pred = reconstruct_trajectory(
-                    observed_weights,
-                    base_metabolisms,
-                    nutrition_tensor,
-                    sport_tensor,
-                    self.model.initial_adj_weight,
-                    self.normalization_stats,
-                )
-            # Free temporaries aggressively (keep base_metabolisms for downstream conversion)
-            del observed_weights, nutrition_tensor, sport_tensor, predicted_observed_weight
-            gc.collect()
+            raise HTTPException(status_code=503, detail="NumPy weights not loaded")
 
         # De-normalize outputs
         # Convert results to numpy uniformly
         import numpy as _np
-        base_metabolisms_np = (
-            base_metabolisms.squeeze() if isinstance(base_metabolisms, _np.ndarray) else base_metabolisms.squeeze().cpu().numpy()
-        )
-        w_adj_np = (
-            w_adj_pred.squeeze() if isinstance(w_adj_pred, _np.ndarray) else w_adj_pred.squeeze().cpu().numpy()
-        )
+        base_metabolisms_np = base_metabolisms.squeeze()
+        w_adj_np = w_adj_pred.squeeze()
         base_metabolisms_kcal = base_metabolisms_np * 1000.0
         w_adj_pred_actual = w_adj_np + weight_mean
         actual_weight = features_df["pds"].values

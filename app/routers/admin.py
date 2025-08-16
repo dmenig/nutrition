@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from fastapi.security import APIKeyHeader
 from app.core.config import settings
-from app.jobs.retrain_model import retrain_model_job
 from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.db.models import FoodLog, SportActivity, User
@@ -29,14 +28,12 @@ def get_api_key(api_key: str = Depends(api_key_header)):
 
 @router.post("/retrain", status_code=status.HTTP_200_OK)
 async def retrain_model(api_key: str = Depends(get_api_key)):
-    try:
-        retrain_model_job()
-        return {"message": "Model retraining initiated successfully."}
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Model retraining failed: {e}",
-        )
+    # Training requires PyTorch and is not available in the production container.
+    # Provide a clear response without importing heavy training code.
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Retraining is disabled in this deployment (NumPy-only inference). Train offline and upload models/recurrent_model_np.npz and models/best_params.json.",
+    )
 
 
 @router.post("/backfill-daily-summaries", status_code=status.HTTP_200_OK)
