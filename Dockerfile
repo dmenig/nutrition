@@ -73,6 +73,5 @@ PY
 # Make port 8000 available to the world outside this container
 EXPOSE 8000
 
-# Run app.main:app when the container launches
-# Only initialize DB once if needed; no CSV usage in production
-CMD ["sh", "-c", "python app/db/populate_db.py && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+# Run app.main:app when the container launches (no CSV-based population in production)
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port 8000"]

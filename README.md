@@ -80,7 +80,7 @@ If `adb` cannot find a device, ensure Developer options and USB debugging are en
 
 ### Deploy (Render)
 
-- Pushes to `main` trigger an automatic rebuild/redeploy of the backend on Render.
+- Pushes to the configured branch on Render trigger an automatic rebuild/redeploy of the backend. In this repo, the default branch is `master`.
 - Service URL: `https://nutrition-tbdo.onrender.com/` (health: `/api/v1/health`).
 - Verify plots after deploy:
   - `curl -sS https://nutrition-tbdo.onrender.com/api/v1/plots/weight | jq '.W_obs | length'`
@@ -97,7 +97,7 @@ The API serves plots by predicting daily metabolism/weight adjustment using a sm
 - **Runtime selection**:
   - If `models/recurrent_model_np.npz` exists, the API uses a NumPy-only backend and does not import PyTorch (saves ~150–200 MB RAM).
   - If the `.npz` is missing, it lazily imports PyTorch on first use, loads `models/recurrent_model.pth`, sets single-threaded backends, and applies dynamic quantization for CPU.
-  - The model is not loaded at startup; it is loaded on first prediction or via `POST /api/v1/predict/reload-model`.
+  - The model is loaded lazily: on first prediction or during a background warm-up at startup. You can also trigger a reload via `POST /api/v1/predict/reload-model`.
 
 - **Files**:
   - `models/recurrent_model.pth`: PyTorch state dict.
@@ -161,7 +161,7 @@ This repo includes scripts and data to fill the production database with food de
 - DB configuration source of truth:
   - The default `DATABASE_URL` is defined in code in `app/core/config.py` (`Settings.DATABASE_URL`).
   - Settings are loaded via `pydantic-settings`, which reads `.env` and `.env.local` automatically. Any value set in the environment or these files will override the in-code default.
-  - For docker-compose, `.env` already contains `DATABASE_URL=postgresql://user:password@db:5432/nutrition_db` so containers can talk to the Postgres service at host `db`. If you run Alembic from the host, ensure `DATABASE_URL` points to Neon (not `db`/localhost) to avoid connection errors.
+  - For docker-compose, set `DATABASE_URL=postgresql://user:password@db:5432/nutrition_db` in a `.env` file so containers can talk to the Postgres service at host `db`. If you run Alembic from the host, ensure `DATABASE_URL` points to Neon (not `db`/localhost) to avoid connection errors.
 
 - Prepare CSVs (if you haven’t already processed the Excel journal):
   ```bash

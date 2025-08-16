@@ -917,8 +917,9 @@ def get_weight_plot_data(days: int | None = None):
         )
     features_df = pd.DataFrame(recs)
     outs = prediction_service.predict_from_features(features_df)
-    # Build epoch ms time_index from dates
-    dt = pd.to_datetime(features_df["date"], errors="coerce")
+    # Build epoch ms time_index from dates (normalized to UTC at day start)
+    dt = pd.to_datetime(features_df["date"], errors="coerce").dt.tz_localize("UTC", nonexistent="shift_forward", ambiguous="NaT", errors="coerce")
+    dt = dt.dt.normalize()
     time_index = (dt.view("int64") // 1_000_000).astype("int64").tolist()
     w_adj_pred = outs.get("predicted_adjusted_weight", [])
     w_obs_fallback = outs.get("actual_weight", [])

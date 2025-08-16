@@ -38,7 +38,8 @@ class PlotsRepository @Inject constructor(
             DateRange.YEAR -> 365
         }
         val resp = plotsApiService.getWeightPlot(days = days)
-        return resp.W_obs.map { Entry(toDaysSinceEpochFromAny(it.time_index), it.value) }
+        val series = if (resp.W_obs.isNotEmpty()) resp.W_obs else resp.W_adj_pred
+        return series.map { Entry(toDaysSinceEpochFromAny(it.time_index), it.value) }
     }
 
     suspend fun getMetabolismData(dateRange: DateRange): List<Entry> {
