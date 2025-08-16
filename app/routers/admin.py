@@ -7,6 +7,12 @@ from app.db.database import get_db
 from app.db.models import FoodLog, SportActivity, User
 from datetime import datetime, timezone
 from app.services.summary import upsert_daily_summary, backfill_all_summaries
+from app.db.populate_db import (
+    populate_food_table,
+    populate_food_log_table,
+    populate_sport_activities_table,
+    verify_population,
+)
 from sqlalchemy import func
 
 router = APIRouter()
@@ -49,3 +55,25 @@ def backfill_daily_summaries(api_key: str = Depends(get_api_key), db: Session = 
 
     updated = backfill_all_summaries(db, user_id)
     return {"updated_days": updated}
+
+
+@router.post("/populate", status_code=status.HTTP_200_OK)
+def populate_all(api_key: str = Depends(get_api_key)):
+    """Populate foods, food_logs, and sport_activities from packaged CSVs on the server."""
+    try:
+        populate_food_table()
+        populate_food_log_table()
+        populate_sport_activities_table()
+        # Capture counts
+        from sqlalchemy import text as _text
+        from app.db.database import SessionLocal as _Sess
+        sess = _Sess()
+        try:
+            foods = sess.execute(_text("SELECT COUNT(*) FROM foods")).scalar() or 0
+            logs = sess.execute(_text("SELECT COUNT(*) FROM food_logs")).scalar() or 0
+            sports = sess.execute(_text("SELECT COUNT(*) FROM sport_activities")).scalar() or 0
+        finally:
+            sess.close()
+        return {"foods": int(foods), "food_logs": int(logs), "sport_activities": int(sports)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Populate failed: {e}")
