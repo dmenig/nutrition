@@ -325,3 +325,29 @@ Use this to install/run the Android app on a physical phone over its Tailscale I
     - Ensure the phone is reachable on `<TAILSCALE_IP>:5555` (Tailscale is connected and not asleep). Re-run `adb tcpip 5555` over USB if needed.
     - On Android 12+ using Wireless debugging UI instead of `tcpip`, you may need pairing: `adb pair <IP:PAIRING_PORT>` and enter the pairing code from the phone; then `adb connect <IP:PORT>`.
   - Security note: disconnect or switch back to USB when finished to avoid leaving ADB exposed.
+
+## Fast path for future assistants (LLMs)
+
+- Deployment branch
+  - Render deploys from `master` (not `main`). Push to `master` only. If `main` has commits, merge/cherry-pick into `master` and delete `main`.
+
+- Production DB population (server-side)
+  - Admin endpoints (require `X-API-Key`):
+    - Trigger population (async): `POST /api/v1/admin/populate-async`
+    - Check status: `GET /api/v1/admin/populate/status`
+    - Backfill summaries: `POST /api/v1/admin/backfill-daily-summaries`
+  - Use these to quickly load packaged CSVs on the server and make plots/model endpoints return data.
+
+- Plots and model endpoints (DL-only)
+  - `simple` query param removed; only `days` is supported.
+  - Endpoints: `/api/v1/plots/weight`, `/api/v1/plots/metabolism`, `/api/v1/plots/energy-balance`, `/api/v1/predict/latest`.
+  - They depend on DB data; populate first.
+
+- Model files for low-memory inference
+  - Prefer NumPy path: ensure `models/recurrent_model_np.npz` and `models/best_params.json` exist in the container.
+
+- Quick production checks
+  - Health: `curl -sS $BASE/api/v1/health`
+  - Debug: `curl -sS $BASE/api/v1/plots/debug | jq .` (expect non-zero `final_rows` and `db_*_days`)
+  - Plots: `curl -sS $BASE/api/v1/plots/weight | jq '.W_obs | length'`
+  - Predict: `curl -sS $BASE/api/v1/predict/latest | jq .`
