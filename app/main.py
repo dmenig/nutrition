@@ -730,6 +730,82 @@ def plots_debug():
         debug["final_cols"] = list(df_final.columns)
     except Exception as e:
         debug["final_error"] = str(e)
+    # Extra diagnostics for model/params presence and DL path
+    try:
+        debug["has_npz"] = os.path.exists(prediction_service.npz_path)
+        debug["has_params"] = os.path.exists(prediction_service.params_path) or os.path.exists("/app/models/best_params.json")
+        # Build a tiny features DF like /predict/latest uses
+        db = SessionLocal()
+        try:
+            date_expr_fl = func.coalesce(FoodLog.logged_date, func.date(FoodLog.logged_at))
+            food_rows = (
+                db.query(
+                    date_expr_fl.label("date"),
+                    func.coalesce(func.sum(FoodLog.calories), 0.0).label("calories"),
+                    func.coalesce(func.sum(FoodLog.carbs), 0.0).label("carbs"),
+                )
+                .group_by(date_expr_fl)
+                .order_by(date_expr_fl)
+                .all()
+            )
+            date_expr_sa = func.coalesce(SportActivity.logged_date, func.date(SportActivity.logged_at))
+            sport_rows = (
+                db.query(
+                    date_expr_sa.label("date"),
+                    func.coalesce(func.sum(SportActivity.calories_expended), 0.0).label("sport"),
+                )
+                .group_by(date_expr_sa)
+                .order_by(date_expr_sa)
+                .all()
+            )
+        finally:
+            db.close()
+        dates = sorted({r.date for r in food_rows} | {r.date for r in sport_rows})
+        if dates:
+            food_by_date = {r.date: r for r in food_rows}
+            sport_by_date = {r.date: r for r in sport_rows}
+            # Use last 14 days for a quick probe
+            tail_dates = dates[-14:]
+            records: list[dict] = []
+            for d in tail_dates:
+                fr = food_by_date.get(d)
+                sr = sport_by_date.get(d)
+                records.append(
+                    {
+                        "date": d,
+                        "calories": float(getattr(fr, "calories", 0.0) or 0.0),
+                        "carbs": float(getattr(fr, "carbs", 0.0) or 0.0),
+                        "sugar": 0.0,
+                        "sel": 0.0,
+                        "alcool": 0.0,
+                        "water": 0.0,
+                        "sport": float(getattr(sr, "sport", 0.0) or 0.0),
+                        "pds": 0.0,
+                    }
+                )
+            feat = pd.DataFrame(records)
+            try:
+                outs = prediction_service.predict_from_features(feat)
+                debug["dl_ok"] = True
+                debug["dl_series_keys"] = list(outs.keys())
+                debug["dl_w_adj_len"] = int(len(outs.get("predicted_adjusted_weight", [])))
+                debug["dl_m_base_len"] = int(len(outs.get("base_metabolism_kcal", [])))
+                # Show min/max to catch all-zero
+                import numpy as _np
+                w_adj = _np.asarray(outs.get("predicted_adjusted_weight", []), dtype=float)
+                m_base = _np.asarray(outs.get("base_metabolism_kcal", []), dtype=float)
+                if w_adj.size:
+                    debug["dl_w_adj_minmax"] = [float(_np.nanmin(w_adj)), float(_np.nanmax(w_adj))]
+                if m_base.size:
+                    debug["dl_m_base_minmax"] = [float(_np.nanmin(m_base)), float(_np.nanmax(m_base))]
+            except Exception as ee:
+                debug["dl_ok"] = False
+                debug["dl_error"] = str(ee)
+        else:
+            debug["dl_ok"] = False
+            debug["dl_error"] = "no dates in DB"
+    except Exception as e2:
+        debug["dl_diag_error"] = str(e2)
     return debug
 
 
