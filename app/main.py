@@ -357,21 +357,23 @@ async def get_latest_prediction():
     db = SessionLocal()
     try:
         # Aggregate minimal features per day from DB
+        date_expr_fl = func.coalesce(FoodLog.logged_date, func.date(FoodLog.logged_at))
         food_rows = (
             db.query(
-                FoodLog.logged_date.label("date"),
+                date_expr_fl.label("date"),
                 func.coalesce(func.sum(FoodLog.calories), 0.0).label("calories"),
                 func.coalesce(func.sum(FoodLog.carbs), 0.0).label("carbs"),
             )
-            .group_by(FoodLog.logged_date)
+            .group_by(date_expr_fl)
             .all()
         )
+        date_expr_sa = func.coalesce(SportActivity.logged_date, func.date(SportActivity.logged_at))
         sport_rows = (
             db.query(
-                SportActivity.logged_date.label("date"),
+                date_expr_sa.label("date"),
                 func.coalesce(func.sum(SportActivity.calories_expended), 0.0).label("sport"),
             )
-            .group_by(SportActivity.logged_date)
+            .group_by(date_expr_sa)
             .all()
         )
     finally:
@@ -511,21 +513,23 @@ def get_plot_data(last_n: int | None = None):
         db = SessionLocal()
         try:
             # Aggregate per day calories and carbs; set other nutrition features to 0
+            date_expr_fl = func.coalesce(FoodLog.logged_date, func.date(FoodLog.logged_at))
             food_rows = (
                 db.query(
-                    FoodLog.logged_date.label("date"),
+                    date_expr_fl.label("date"),
                     func.coalesce(func.sum(FoodLog.calories), 0.0).label("calories"),
                     func.coalesce(func.sum(FoodLog.carbs), 0.0).label("carbs"),
                 )
-                .group_by(FoodLog.logged_date)
+                .group_by(date_expr_fl)
                 .all()
             )
+            date_expr_sa = func.coalesce(SportActivity.logged_date, func.date(SportActivity.logged_at))
             sport_rows = (
                 db.query(
-                    SportActivity.logged_date.label("date"),
+                    date_expr_sa.label("date"),
                     func.coalesce(func.sum(SportActivity.calories_expended), 0.0).label("sport"),
                 )
-                .group_by(SportActivity.logged_date)
+                .group_by(date_expr_sa)
                 .all()
             )
             dates = sorted({r.date for r in food_rows} | {r.date for r in sport_rows})
@@ -673,8 +677,10 @@ def plots_debug():
         db = SessionLocal()
         try:
             debug["db_daily_summaries"] = int(db.query(func.count(DailySummary.id)).scalar() or 0)
-            debug["db_food_days"] = int(db.query(func.count(func.distinct(FoodLog.logged_date))).scalar() or 0)
-            debug["db_sport_days"] = int(db.query(func.count(func.distinct(SportActivity.logged_date))).scalar() or 0)
+            dfl = func.coalesce(FoodLog.logged_date, func.date(FoodLog.logged_at))
+            dsa = func.coalesce(SportActivity.logged_date, func.date(SportActivity.logged_at))
+            debug["db_food_days"] = int(db.query(func.count(func.distinct(dfl))).scalar() or 0)
+            debug["db_sport_days"] = int(db.query(func.count(func.distinct(dsa))).scalar() or 0)
         finally:
             db.close()
     except Exception as e:
