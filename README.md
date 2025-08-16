@@ -15,6 +15,19 @@ Notes:
 - A debug keystore is generated automatically if missing (see `android_app/app/build.gradle` `preBuild` task).
 - Min SDK 24, Target SDK 34. Application ID: `com.nutrition.app`.
 
+### Quick: build and install on a connected phone (USB)
+
+```bash
+cd android_app
+# Build and install the debug variant on the connected device
+./gradlew installDebug
+
+# Launch the app
+adb shell monkey -p com.nutrition.app -c android.intent.category.LAUNCHER 1
+```
+
+If `adb` cannot find a device, ensure Developer options and USB debugging are enabled on the phone. Use `adb devices` to verify.
+
 ### Backend/API Base URL
 - Defined in `android_app/app/src/main/java/com/nutrition/app/di/AppModule.kt` inside `provideRetrofit(...)` via `.baseUrl("...")`.
 - Default: `https://nutrition-tbdo.onrender.com/`.
@@ -73,8 +86,59 @@ Notes:
   - `curl -sS https://nutrition-tbdo.onrender.com/api/v1/plots/weight | jq '.W_obs | length'`
   - `curl -sS https://nutrition-tbdo.onrender.com/api/v1/plots/metabolism | jq '.M_base | length'`
   - `curl -sS https://nutrition-tbdo.onrender.com/api/v1/plots/energy-balance | jq '.calories_unnorm | length'`
-- If plots return 0 points, the backend includes a fallback to synthesize series from `data/features.csv`. You can also trigger a rebuild endpoint:
+- If plots return 0 points, the mobile app shows "Nothing found" and no series are drawn. You can optionally attempt to prebuild plot data on the server:
   - `curl -X POST https://nutrition-tbdo.onrender.com/api/v1/plots/rebuild`
+
+
+## Backend model inference (low-memory on Render)
+
+The API serves plots by predicting daily metabolism/weight adjustment using a small GRU model. Production runs in a 512 MB container, so the model is served with a torch-free path by default.
+
+- **Runtime selection**:
+  - If `models/recurrent_model_np.npz` exists, the API uses a NumPy-only backend and does not import PyTorch (saves ~150–200 MB RAM).
+  - If the `.npz` is missing, it lazily imports PyTorch on first use, loads `models/recurrent_model.pth`, sets single-threaded backends, and applies dynamic quantization for CPU.
+  - The model is not loaded at startup; it is loaded on first prediction or via `POST /api/v1/predict/reload-model`.
+
+- **Files**:
+  - `models/recurrent_model.pth`: PyTorch state dict.
+  - `models/recurrent_model_np.npz`: NumPy weights for torch-free inference.
+  - `models/best_params.json`: normalization stats required by both backends.
+
+- **Export the NumPy weights**:
+  - Training already exports both `.pth` and `.npz`:
+    ```bash
+    PYTHONPATH=. python train_model.py
+    # writes models/recurrent_model.pth and models/recurrent_model_np.npz
+    ```
+  - If you only have the `.pth`, the Docker image will attempt a build-time export to `.npz`. You can also convert locally:
+    ```bash
+    PYTHONPATH=. python3 - << 'PY'
+import os, numpy as np, torch
+pth='models/recurrent_model.pth'
+sd=torch.load(pth, map_location='cpu')
+sd=sd.get('state_dict', sd)
+keys=['gru.weight_ih_l0','gru.weight_hh_l0','gru.bias_ih_l0','gru.bias_hh_l0',
+      'gru.weight_ih_l1','gru.weight_hh_l1','gru.bias_ih_l1','gru.bias_hh_l1',
+      'metabolism_increment_head.0.weight','metabolism_increment_head.0.bias',
+      'metabolism_increment_head.2.weight','metabolism_increment_head.2.bias',
+      'initial_metabolism','initial_adj_weight']
+np.savez('models/recurrent_model_np.npz', **{k.replace('metabolism_increment_head','head'):(sd[k].cpu().numpy() if k in sd else np.empty((0,),dtype=np.float32)) for k in keys})
+print('OK: models/recurrent_model_np.npz')
+PY
+    ```
+
+- **Low-thread CPU settings**:
+  - Set in code at process start, and in `render.yaml` env variables: `OMP_NUM_THREADS=1`, `OPENBLAS_NUM_THREADS=1`, `MKL_NUM_THREADS=1`, `NUMEXPR_NUM_THREADS=1`, `MKL_THREADING_LAYER=SEQUENTIAL`, `MALLOC_ARENA_MAX=2`.
+
+- **Verify predictions/plots after deploy**:
+  - Health: `curl -sS $BASE/api/v1/health`
+  - Debug (should show non-zero `final_rows` and expected columns): `curl -sS $BASE/api/v1/plots/debug | jq .`
+  - Latest prediction (drives plots): `curl -sS $BASE/api/v1/predict/latest | jq .`
+  - Metabolism data: `curl -sS "$BASE/api/v1/plots/metabolism?days=30" | jq '.M_base | length'`
+
+- **Operational notes**:
+  - You can hot-reload weights: `POST /api/v1/predict/reload-model`.
+  - If you truly never need PyTorch in production, you can omit it from the image; the app will use NumPy. In this repo, PyTorch is kept in `requirements.txt` to support local training/tests. Render RAM impact is minimized by the torch-free inference path.
 
 
 ### Populate the Production Database (Neon)

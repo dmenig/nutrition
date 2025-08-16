@@ -1,3 +1,12 @@
+# Set low-memory/thread env before importing libraries that may initialize BLAS backends
+import os as _early_os
+_early_os.environ.setdefault("OMP_NUM_THREADS", "1")
+_early_os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+_early_os.environ.setdefault("MKL_NUM_THREADS", "1")
+_early_os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+_early_os.environ.setdefault("MKL_THREADING_LAYER", "SEQUENTIAL")
+_early_os.environ.setdefault("MALLOC_ARENA_MAX", "2")
+
 from fastapi import FastAPI, Depends, HTTPException, status, Request
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
@@ -23,8 +32,8 @@ import json
 import os
 from typing import Any
 from fastapi import BackgroundTasks
-import torch
-from train_model import FinalModel, reconstruct_trajectory  # Import the model and trajectory util
+import gc
+# Defer heavy imports from `train_model` until needed to keep memory/CPU footprint low
 import json  # Added import for json
 import pathlib
 from sqlalchemy import func
@@ -48,12 +57,15 @@ app.include_router(foods.router, prefix="", tags=["foods"])
 
 class PredictionService:
     model: Any = None
+    np_model: Any = None
     model_path: str = "models/recurrent_model.pth"
     params_path: str = "models/best_params.json"
+    npz_path: str = "models/recurrent_model_np.npz"
     normalization_stats: dict = {}  # Initialize normalization_stats
 
     def __init__(self):
-        self.load_model()
+        # Lazy-load the model to avoid importing torch until needed
+        pass
 
     def _resolve_first_existing(self, candidates):
         for path in candidates:
@@ -62,6 +74,23 @@ class PredictionService:
         return candidates[0]
 
     def load_model(self):
+        # Import torch lazily to avoid loading it until strictly necessary
+        import os as _os
+        # Ensure CPU backends use a single thread to reduce memory/threads
+        _os.environ.setdefault("OMP_NUM_THREADS", "1")
+        _os.environ.setdefault("MKL_NUM_THREADS", "1")
+        _os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+        import torch  # noqa: WPS433 (local import by design)
+        import torch.nn as nn  # noqa: WPS433
+        try:
+            from train_model import FinalModel  # noqa: WPS433
+        except Exception as exc:
+            raise RuntimeError(f"Unable to import model definition: {exc}")
+        torch.set_num_threads(1)
+        try:
+            torch.set_num_interop_threads(1)
+        except Exception:
+            pass
         # Load normalization stats and initial weight guess from best_params.json
         try:
             params_path = self._resolve_first_existing(
@@ -122,15 +151,51 @@ class PredictionService:
                     self.model = loaded
                 except Exception as e:
                     raise RuntimeError(f"Failed to load model weights from {model_path}: {e}")
-        self.model.eval()  # Set model to evaluation mode
+        # Ensure model is on CPU and in eval mode
+        self.model.eval()
+        # Apply dynamic quantization for minimal CPU memory footprint
+        try:
+            try:
+                quantize_dynamic = torch.quantization.quantize_dynamic
+            except Exception:
+                from torch.ao.quantization import quantize_dynamic  # type: ignore
+            self.model = quantize_dynamic(self.model, {nn.Linear, nn.GRU}, dtype=torch.qint8)
+        except Exception:
+            pass
+        # Best-effort cleanup of loader temp objects
+        del loaded
+        gc.collect()
         print(f"Model loaded successfully from {self.model_path}")
 
     def predict(self, data: pd.DataFrame):
+        # Prefer numpy inference path if weights are available
+        if self.np_model is None and os.path.exists(self.npz_path):
+            try:
+                from app.np_infer import load_numpy_weights, NumpyFinalModel  # noqa: WPS433
+                weights = load_numpy_weights(self.npz_path)
+                # Infer architecture sizes from saved shapes
+                head_w = weights.get("head.0.weight")
+                gru_w = weights.get("gru.weight_hh_l0")
+                if head_w is None or gru_w is None:
+                    raise RuntimeError("NP weights missing required tensors")
+                hidden_size = gru_w.shape[1]
+                input_size = head_w.shape[1] - hidden_size
+                num_layers = sum(1 for k in weights.keys() if k.startswith("gru.weight_ih_l"))
+                self.np_model = NumpyFinalModel(weights, input_size, hidden_size, num_layers)
+            except Exception:
+                self.np_model = None
+        # If numpy path is present, avoid importing torch entirely
+        if self.np_model is None:
+            # Import torch lazily
+            import torch  # noqa: WPS433
+        else:
+            torch = None  # type: ignore
         if self.model is None:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Prediction model not loaded.",
-            )
+            if torch is None:
+                # We will use numpy-only path; no torch load
+                pass
+            else:
+                self.load_model()
         # Assuming the input data needs to be converted to a tensor and normalized
         # This part needs to be aligned with how the model expects its input during prediction
         # For now, a placeholder for prediction.
@@ -157,19 +222,40 @@ class PredictionService:
                 normalized_data[col] = (
                     normalized_data[col] - self.normalization_stats[col]["mean"]
                 )
-        nutrition_tensor = torch.tensor(
-            normalized_data.values, dtype=torch.float32
-        ).unsqueeze(0)
-        with torch.no_grad():
-            base_metabolisms = self.model(nutrition_tensor)
+        features = normalized_data.values.astype("float32")[None, :, :]
+        if self.np_model is not None:
+            base_metabolisms = self.np_model.forward(features)
             return base_metabolisms.squeeze().tolist()
+        else:
+            nutrition_tensor = torch.tensor(features, dtype=torch.float32)
+            with torch.inference_mode():
+                base_metabolisms = self.model(nutrition_tensor)
+                return base_metabolisms.squeeze().tolist()
 
     def predict_from_features(self, features_df: pd.DataFrame):
+        # Prefer numpy inference path if available
+        using_numpy = False
+        if self.np_model is None and os.path.exists(self.npz_path):
+            try:
+                from app.np_infer import load_numpy_weights, NumpyFinalModel, reconstruct_trajectory_numpy  # noqa: WPS433
+                weights = load_numpy_weights(self.npz_path)
+                gru_w = weights.get("gru.weight_hh_l0")
+                head_w = weights.get("head.0.weight")
+                hidden_size = gru_w.shape[1]
+                input_size = head_w.shape[1] - hidden_size
+                num_layers = sum(1 for k in weights.keys() if k.startswith("gru.weight_ih_l"))
+                self.np_model = NumpyFinalModel(weights, input_size, hidden_size, num_layers)
+                using_numpy = True
+            except Exception:
+                self.np_model = None
+                using_numpy = False
+        if not using_numpy:
+            import torch  # noqa: WPS433
         if self.model is None:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Prediction model not loaded.",
-            )
+            if using_numpy:
+                pass
+            else:
+                self.load_model()
         # Ensure required columns and numeric types
         nutrition_cols = ["calories", "carbs", "sugar", "sel", "alcool", "water"]
         required_cols = nutrition_cols + ["sport", "pds"]
@@ -190,28 +276,56 @@ class PredictionService:
         norm_df["pds_normalized"] = norm_df["pds"] - weight_mean
 
         # Tensors
-        observed_weights = torch.tensor(
-            norm_df["pds_normalized"].values, dtype=torch.float32
-        ).unsqueeze(0)
-        nutrition_tensor = torch.tensor(
-            norm_df[nutrition_cols].values, dtype=torch.float32
-        ).unsqueeze(0)
-        sport_tensor = torch.tensor(norm_df["sport"].values, dtype=torch.float32).unsqueeze(0)
-
-        with torch.no_grad():
-            base_metabolisms = self.model(nutrition_tensor)
-            predicted_observed_weight, w_adj_pred = reconstruct_trajectory(
-                observed_weights,
+        if using_numpy and self.np_model is not None:
+            obs_np = norm_df["pds_normalized"].values.astype("float32")[None, :]
+            nut_np = norm_df[nutrition_cols].values.astype("float32")[None, :, :]
+            sport_np = norm_df["sport"].values.astype("float32")[None, :]
+            base_metabolisms = self.np_model.forward(nut_np)
+            from app.np_infer import reconstruct_trajectory_numpy  # noqa: WPS433
+            predicted_observed_weight, w_adj_pred = reconstruct_trajectory_numpy(
+                obs_np,
                 base_metabolisms,
-                nutrition_tensor,
-                sport_tensor,
-                self.model.initial_adj_weight,
+                nut_np,
+                sport_np,
+                float(self.np_model.initial_adj_weight),
                 self.normalization_stats,
             )
+        else:
+            import torch  # noqa: WPS433
+            observed_weights = torch.tensor(
+                norm_df["pds_normalized"].values, dtype=torch.float32
+            ).unsqueeze(0)
+            nutrition_tensor = torch.tensor(
+                norm_df[nutrition_cols].values, dtype=torch.float32
+            ).unsqueeze(0)
+            sport_tensor = torch.tensor(norm_df["sport"].values, dtype=torch.float32).unsqueeze(0)
+
+            with torch.inference_mode():
+                base_metabolisms = self.model(nutrition_tensor)
+                from train_model import reconstruct_trajectory  # noqa: WPS433
+                predicted_observed_weight, w_adj_pred = reconstruct_trajectory(
+                    observed_weights,
+                    base_metabolisms,
+                    nutrition_tensor,
+                    sport_tensor,
+                    self.model.initial_adj_weight,
+                    self.normalization_stats,
+                )
+            # Free temporaries aggressively
+            del observed_weights, nutrition_tensor, sport_tensor, base_metabolisms, predicted_observed_weight
+            gc.collect()
 
         # De-normalize outputs
-        base_metabolisms_kcal = base_metabolisms.squeeze().cpu().numpy() * 1000.0
-        w_adj_pred_actual = w_adj_pred.squeeze().cpu().numpy() + weight_mean
+        # Convert results to numpy uniformly
+        import numpy as _np
+        base_metabolisms_np = (
+            base_metabolisms.squeeze() if isinstance(base_metabolisms, _np.ndarray) else base_metabolisms.squeeze().cpu().numpy()
+        )
+        w_adj_np = (
+            w_adj_pred.squeeze() if isinstance(w_adj_pred, _np.ndarray) else w_adj_pred.squeeze().cpu().numpy()
+        )
+        base_metabolisms_kcal = base_metabolisms_np * 1000.0
+        w_adj_pred_actual = w_adj_np + weight_mean
         actual_weight = features_df["pds"].values
         water_retention = actual_weight - w_adj_pred_actual
 
@@ -233,7 +347,8 @@ prediction_service = PredictionService()
 
 @app.on_event("startup")
 async def startup_event():
-    prediction_service.load_model()
+    # Do not eagerly load the model on startup to keep memory minimal until needed
+    return None
 
 
 @app.get("/api/v1/predict/latest", tags=["prediction"])
@@ -269,9 +384,8 @@ async def reload_model(background_tasks: BackgroundTasks):
 app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
 
 
-def get_plot_data():
-    # Load results if available; otherwise, construct a minimal but non-empty frame
-    results_path = "data/final_results.csv"
+def get_plot_data(last_n: int | None = None):
+    # Construct plot data strictly from the database (no CSVs in production)
     expected_cols = [
         "W_obs",
         "W_adj_pred",
@@ -279,14 +393,6 @@ def get_plot_data():
         "calories",
         "sport",
     ]
-
-    def _load_results_csv() -> pd.DataFrame:
-        if os.path.exists(results_path):
-            try:
-                return pd.read_csv(results_path)
-            except Exception:
-                return pd.DataFrame(columns=expected_cols)
-        return pd.DataFrame(columns=expected_cols)
 
     def _build_from_daily_summaries() -> pd.DataFrame:
         db = SessionLocal()
@@ -305,12 +411,11 @@ def get_plot_data():
             ])
             # Sum across users per date
             df = df.groupby("date", as_index=False).sum(numeric_only=True)
-            # Add a reasonable constant metabolism placeholder
-            df["M_base"] = 2500.0
-            # Fill required columns
+            # Fill required columns (leave weights empty if unknown)
             df["W_obs"] = pd.Series(dtype=float)
             df["W_adj_pred"] = pd.Series(dtype=float)
-            return df[expected_cols]
+            # Keep date for downstream time_index construction
+            return df[["date", *expected_cols]]
         finally:
             db.close()
 
@@ -346,6 +451,7 @@ def get_plot_data():
                 )
                 records.append(
                     {
+                        "date": d,
                         "calories": float(cal or 0.0),
                         "sport": float(sport_total or 0.0),
                         "M_base": 2500.0,
@@ -354,100 +460,117 @@ def get_plot_data():
             df = pd.DataFrame(records)
             df["W_obs"] = pd.Series(dtype=float)
             df["W_adj_pred"] = pd.Series(dtype=float)
-            return df[expected_cols]
+            return df[["date", *expected_cols]]
         finally:
             db.close()
 
-    def _fallback_build_from_features() -> pd.DataFrame:
-        """Fallback: try to create a simple dataset from features or raw processed journal.
-
-        Returns a DataFrame with columns in expected_cols (plus time_index to be added later).
-        """
-        # Try features.csv first
-        features_path = "data/features.csv"
-        features_df = None
-        if os.path.exists(features_path):
-            try:
-                features_df = pd.read_csv(features_path)
-            except Exception:
-                features_df = None
-
-        # If not available, attempt to generate via build_features
-        if features_df is None:
-            try:
-                from build_features import main as build_features_main
-
-                features_df = build_features_main(
-                    journal_path="data/processed_journal.csv",
-                    variables_path="data/variables.csv",
+    def _build_features_from_db() -> pd.DataFrame:
+        """Build minimal features directly from DB for model usage (no CSV)."""
+        db = SessionLocal()
+        try:
+            # Aggregate per day calories and carbs; set other nutrition features to 0
+            food_rows = (
+                db.query(
+                    FoodLog.logged_date.label("date"),
+                    func.coalesce(func.sum(FoodLog.calories), 0.0).label("calories"),
+                    func.coalesce(func.sum(FoodLog.carbs), 0.0).label("carbs"),
                 )
-            except Exception:
-                features_df = None
-
-        # If still missing, return empty frame with expected columns
-        if features_df is None or features_df.empty:
-            return pd.DataFrame(columns=expected_cols)
-
-        # Ensure lowercase/normalized columns (build_features already normalizes names)
-        col = lambda name: name if name in features_df.columns else name.lower()
-
-        # Compose minimal frame
-        out = pd.DataFrame()
-        # Observed weight
-        if "pds" in features_df.columns:
-            out["W_obs"] = pd.to_numeric(features_df["pds"], errors="coerce").fillna(0)
-        elif "Pds" in features_df.columns:
-            out["W_obs"] = pd.to_numeric(features_df["Pds"], errors="coerce").fillna(0)
-        else:
-            out["W_obs"] = pd.Series(dtype=float)
-
-        # Simple smoothed adjusted weight (7-day rolling mean as a proxy)
-        if not out["W_obs"].empty:
-            out["W_adj_pred"] = (
-                out["W_obs"].rolling(window=7, min_periods=1).mean().astype(float)
+                .group_by(FoodLog.logged_date)
+                .all()
             )
-        else:
-            out["W_adj_pred"] = pd.Series(dtype=float)
+            sport_rows = (
+                db.query(
+                    SportActivity.logged_date.label("date"),
+                    func.coalesce(func.sum(SportActivity.calories_expended), 0.0).label("sport"),
+                )
+                .group_by(SportActivity.logged_date)
+                .all()
+            )
+            dates = sorted({r.date for r in food_rows} | {r.date for r in sport_rows})
+            if not dates:
+                return pd.DataFrame(columns=["date", "calories", "carbs", "sugar", "sel", "alcool", "water", "sport", "pds"])  # empty
+            food_by_date = {r.date: r for r in food_rows}
+            sport_by_date = {r.date: r for r in sport_rows}
+            records: list[dict] = []
+            for d in dates:
+                fr = food_by_date.get(d)
+                sr = sport_by_date.get(d)
+                records.append(
+                    {
+                        "date": d,
+                        "calories": float(getattr(fr, "calories", 0.0) or 0.0),
+                        "carbs": float(getattr(fr, "carbs", 0.0) or 0.0),
+                        "sugar": 0.0,
+                        "sel": 0.0,
+                        "alcool": 0.0,
+                        "water": 0.0,
+                        "sport": float(getattr(sr, "sport", 0.0) or 0.0),
+                        # Observed weight unknown in DB; use 0 to allow model to run
+                        "pds": 0.0,
+                    }
+                )
+            return pd.DataFrame(records)
+        finally:
+            db.close()
 
-        # Metabolism: use a reasonable constant if unknown
-        # If a precomputed metabolism exists in features, prefer it
-        if "M_base" in features_df.columns:
-            out["M_base"] = pd.to_numeric(features_df["M_base"], errors="coerce").fillna(0)
-        else:
-            out["M_base"] = 2500.0
-
-        # Calories and sport (unnormalized proxies)
-        if "calories" in features_df.columns:
-            out["calories"] = pd.to_numeric(features_df["calories"], errors="coerce").fillna(0)
-        elif "Calories / 100g" in features_df.columns:
-            out["calories"] = pd.to_numeric(
-                features_df["Calories / 100g"], errors="coerce"
-            ).fillna(0)
-        else:
-            out["calories"] = 0.0
-
-        if "sport" in features_df.columns:
-            out["sport"] = pd.to_numeric(features_df["sport"], errors="coerce").fillna(0)
-        else:
-            out["sport"] = 0.0
-
-        return out[expected_cols]
-
-    # Prefer DB-built summaries; if empty, try direct DB aggregation
-    df = _build_from_daily_summaries()
+    # Priority (DB-only):
+    # - Normal: features from DB + model -> daily summaries -> direct DB agg
+    # - Lightweight: daily summaries -> direct DB agg
+    # Always try model using DB-derived features first (DL model path)
+    features_df = _build_features_from_db()
+    df = pd.DataFrame()
+    if features_df is not None and not features_df.empty:
+        try:
+            outputs = prediction_service.predict_from_features(features_df)
+            df = pd.DataFrame(
+                {
+                    "date": features_df["date"],
+                    "W_obs": outputs.get("actual_weight", []),
+                    "W_adj_pred": outputs.get("predicted_adjusted_weight", []),
+                    "M_base": outputs.get("base_metabolism_kcal", []),
+                    "calories": features_df.get("calories", 0),
+                    "sport": features_df.get("sport", 0),
+                }
+            )
+        except Exception:
+            df = pd.DataFrame()
+    # Safety nets only if DL path failed or produced empty
+    if df.empty:
+        df = _build_from_daily_summaries()
     if df.empty:
         df = _build_from_db_on_the_fly()
 
-    # Do NOT synthesize or use CSV for prod plots; return real DB-only
-
-    # Ensure expected columns exist and are numeric
+    # Ensure expected columns exist
     for col_name in expected_cols:
         if col_name not in df.columns:
-            df[col_name] = []
+            df[col_name] = pd.Series(dtype=float)
+    # Coerce numeric types. Do NOT fill missing weights with zeros; keep NaN to signal "unknown".
+    for col_name in ["calories", "sport", "M_base"]:
         df[col_name] = pd.to_numeric(df[col_name], errors="coerce").fillna(0)
+    for col_name in ["W_obs", "W_adj_pred"]:
+        df[col_name] = pd.to_numeric(df[col_name], errors="coerce")
 
-    # Create a simple time index
-    df["time_index"] = range(len(df))
+    # Build time_index from date if available; otherwise fall back to sequential index
+    if "date" in df.columns:
+        try:
+            dt = pd.to_datetime(df["date"], errors="coerce")
+            # Drop rows with invalid dates to avoid epoch 1970 artifacts
+            valid_mask = dt.notna()
+            df = df.loc[valid_mask].copy()
+            dt = dt.loc[valid_mask]
+            # Convert to epoch milliseconds
+            # Using view("int64") is compatible with modern pandas
+            df["time_index"] = (dt.view("int64") // 1_000_000).astype("int64")
+        except Exception:
+            # As a conservative fallback, keep a monotonically increasing daily index anchored to today
+            start_ms = int(pd.Timestamp.utcnow().normalize().value // 1_000_000)
+            one_day_ms = 24 * 60 * 60 * 1000
+            df["time_index"] = [start_ms + i * one_day_ms for i in range(len(df))]
+    else:
+        # If we truly have no dates, synthesize a daily timeline anchored to today
+        start_ms = int(pd.Timestamp.utcnow().normalize().value // 1_000_000)
+        one_day_ms = 24 * 60 * 60 * 1000
+        df["time_index"] = [start_ms + i * one_day_ms for i in range(len(df))]
 
     # Try to load normalization parameters; if missing, use identity transform
     calories_mean = 0.0
@@ -477,6 +600,13 @@ def get_plot_data():
     df["calories_unnorm"] = df["calories"] * calories_std + calories_mean
     df["sport_unnorm"] = df["sport"] * sport_std + sport_mean
     df["C_exp_t"] = df["M_base"].fillna(0) + df["sport_unnorm"]
+
+    # Ensure sorted by time for slicing
+    if "time_index" in df.columns:
+        df = df.sort_values(by=["time_index"]).reset_index(drop=True)
+    # Optional slicing to last N days/points
+    if isinstance(last_n, int) and last_n > 0 and len(df) > last_n:
+        df = df.tail(last_n).reset_index(drop=True)
     return df
 
 
@@ -485,29 +615,24 @@ def get_plot_data():
 
 @app.get("/api/v1/plots/debug", tags=["plots"])
 def plots_debug():
-    results_path = pathlib.Path("data/final_results.csv")
-    features_path = pathlib.Path("data/features.csv")
     debug = {
         "cwd": str(pathlib.Path.cwd()),
-        "results_exists": results_path.exists(),
-        "features_exists": features_path.exists(),
-        "results_rows": 0,
-        "features_rows": 0,
+        "db_daily_summaries": 0,
+        "db_food_days": 0,
+        "db_sport_days": 0,
         "final_rows": 0,
         "final_cols": [],
     }
     try:
-        if results_path.exists():
-            df_r = pd.read_csv(results_path)
-            debug["results_rows"] = int(len(df_r))
+        db = SessionLocal()
+        try:
+            debug["db_daily_summaries"] = int(db.query(func.count(DailySummary.id)).scalar() or 0)
+            debug["db_food_days"] = int(db.query(func.count(func.distinct(FoodLog.logged_date))).scalar() or 0)
+            debug["db_sport_days"] = int(db.query(func.count(func.distinct(SportActivity.logged_date))).scalar() or 0)
+        finally:
+            db.close()
     except Exception as e:
-        debug["results_error"] = str(e)
-    try:
-        if features_path.exists():
-            df_f = pd.read_csv(features_path)
-            debug["features_rows"] = int(len(df_f))
-    except Exception as e:
-        debug["features_error"] = str(e)
+        debug["db_error"] = str(e)
     try:
         df_final = get_plot_data()
         debug["final_rows"] = int(len(df_final))
@@ -518,31 +643,37 @@ def plots_debug():
 
 
 @app.get("/api/v1/plots/weight", response_model=WeightPlotResponse, tags=["plots"])
-def get_weight_plot_data():
-    df = get_plot_data()
-    return WeightPlotResponse(
-        W_obs=[
-            {"time_index": row["time_index"], "value": row["W_obs"]}
-            for index, row in df.iterrows()
-        ],
-        W_adj_pred=[
-            {"time_index": row["time_index"], "value": row["W_adj_pred"]}
-            for index, row in df.iterrows()
-        ],
-    )
+def get_weight_plot_data(days: int | None = None):
+    df = get_plot_data(last_n=days)
+    # Only include points with meaningful weights (> 0). If none, return empty to allow client fallback.
+    w_obs = [
+        {"time_index": row["time_index"], "value": float(row["W_obs"])}
+        for _, row in df.iterrows()
+        if pd.notnull(row.get("W_obs")) and float(row["W_obs"]) > 0.0
+    ]
+    w_adj = [
+        {"time_index": row["time_index"], "value": float(row["W_adj_pred"])}
+        for _, row in df.iterrows()
+        if pd.notnull(row.get("W_adj_pred")) and float(row["W_adj_pred"]) > 0.0
+    ]
+    return WeightPlotResponse(W_obs=w_obs, W_adj_pred=w_adj)
 
 
 @app.get(
     "/api/v1/plots/metabolism", response_model=MetabolismPlotResponse, tags=["plots"]
 )
-def get_metabolism_plot_data():
-    df = get_plot_data()
-    return MetabolismPlotResponse(
-        M_base=[
-            {"time_index": row["time_index"], "value": row["M_base"]}
-            for index, row in df.iterrows()
+def get_metabolism_plot_data(days: int | None = None):
+    df = get_plot_data(last_n=days)
+    m_values = [float(v) for v in df["M_base"].tolist() if pd.notnull(v)]
+    # If metabolism is a flat placeholder at 2500 across all points, return empty to allow client fallback
+    m_series: list[dict] = []
+    if not (len(m_values) > 0 and all(abs(v - 2500.0) < 1e-6 for v in m_values)):
+        m_series = [
+            {"time_index": row["time_index"], "value": float(row["M_base"])}
+            for _, row in df.iterrows()
+            if pd.notnull(row.get("M_base"))
         ]
-    )
+    return MetabolismPlotResponse(M_base=m_series)
 
 
 @app.get(
@@ -550,8 +681,8 @@ def get_metabolism_plot_data():
     response_model=EnergyBalancePlotResponse,
     tags=["plots"],
 )
-def get_energy_balance_plot_data():
-    df = get_plot_data()
+def get_energy_balance_plot_data(days: int | None = None):
+    df = get_plot_data(last_n=days)
     return EnergyBalancePlotResponse(
         calories_unnorm=[
             {"time_index": row["time_index"], "value": row["calories_unnorm"]}
@@ -570,8 +701,8 @@ def get_energy_balance_plot_data():
     response_model=EnergyBalancePlotResponse,
     tags=["plots"],
 )
-def get_energy_balance_plot_data_alias():
-    return get_energy_balance_plot_data()
+def get_energy_balance_plot_data_alias(days: int | None = None):
+    return get_energy_balance_plot_data(days=days)
 
 
 @app.get("/plots", tags=["plots"])

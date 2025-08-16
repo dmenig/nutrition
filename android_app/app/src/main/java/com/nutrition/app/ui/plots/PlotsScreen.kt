@@ -113,17 +113,19 @@ fun LineChartComposable(plotType: String, viewModel: PlotsViewModel = hiltViewMo
                 setTouchEnabled(true)
                 setPinchZoom(true)
                 description.isEnabled = false
-                setNoDataText("No data available for $plotType")
+                setNoDataText("Nothing found")
 
                 val mv = CustomMarkerView(context, R.layout.marker_view)
                 marker = mv
 
                 xAxis.position = XAxis.XAxisPosition.BOTTOM
                 xAxis.setDrawGridLines(false)
+                // ValueFormatter expects X in days-since-epoch; convert back to ms for formatting
                 xAxis.valueFormatter = object : ValueFormatter() {
                     private val format = SimpleDateFormat("MMM dd", Locale.getDefault())
                     override fun getFormattedValue(value: Float): String {
-                        return format.format(Date(value.toLong()))
+                        val epochMs = (value * 86_400_000.0f).toLong()
+                        return format.format(Date(epochMs))
                     }
                 }
 
