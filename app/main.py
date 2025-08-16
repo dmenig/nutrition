@@ -665,8 +665,13 @@ def get_plot_data(last_n: int | None = None):
 
 @app.get("/api/v1/plots/debug", tags=["plots"])
 def plots_debug():
+    from urllib.parse import urlparse
+    db_url = os.environ.get("DATABASE_URL", "")
+    parsed = urlparse(db_url) if db_url else None
+    host = parsed.hostname if parsed else None
     debug = {
         "cwd": str(pathlib.Path.cwd()),
+        "db_host": host,
         "db_daily_summaries": 0,
         "db_food_days": 0,
         "db_sport_days": 0,
