@@ -196,8 +196,8 @@ class PredictionService:
             if key not in self.normalization_stats:
                 self.normalization_stats[key] = {"mean": 0.0, "std": 1.0}
         if "pds" not in self.normalization_stats:
-            # Use neutral mean; model initial weight handles absolute scale
-            self.normalization_stats["pds"] = {"mean": 0.0}
+            # Use a realistic human weight mean to produce absolute weights when params are missing
+            self.normalization_stats["pds"] = {"mean": 70.0}
 
     def predict(self, data: pd.DataFrame):
         # Prefer numpy inference path if weights are available
