@@ -9,33 +9,55 @@ import javax.inject.Singleton
 class PlotsRepository @Inject constructor(
     private val plotsApiService: PlotsApiService
 ) {
-    private fun synthesizeEntries(count: Int, base: Float, amplitude: Float): List<Entry> {
-        if (count <= 0) return emptyList()
-        return (0 until count).map { idx ->
-            val y = base + ((idx % 7) - 3) * (amplitude / 3f)
-            Entry(idx.toFloat(), y)
+    // MPAndroidChart uses Float for X; avoid precision loss by using days-since-epoch on the axis.
+    // Normalize backend time_index which may be in ms, seconds, or days (older servers).
+    private fun normalizeToEpochMs(raw: Long): Long {
+        return when {
+            // Clearly in milliseconds (>= ~2001-09-09 in ms). Modern servers send ms.
+            raw >= 1_000_000_000_000L -> raw
+            // Likely in seconds (>= ~2001-09-09 in seconds too high to be days)
+            raw >= 100_000_000L -> raw * 1_000L
+            // Otherwise treat as days-since-epoch
+            else -> raw * 86_400_000L
         }
     }
 
-    private fun nonEmptyOrFallback(series: List<Entry>, base: Float): List<Entry> {
-        return if (series.isEmpty()) synthesizeEntries(30, base = base, amplitude = base * 0.1f) else series
+    private fun toDaysSinceEpochFromAny(rawTimeIndex: Long): Float {
+        val epochMs = normalizeToEpochMs(rawTimeIndex)
+        return (epochMs / 86_400_000.0).toFloat()
     }
 
+    // Always rely on backend-provided time_index; no client-side rebasing.
+
+    
+
     suspend fun getWeightData(dateRange: DateRange): List<Entry> {
-        val resp = plotsApiService.getWeightPlot()
-        val data = resp.W_obs.map { Entry(it.time_index.toFloat(), it.value) }
-        return nonEmptyOrFallback(data, base = 70f)
+        val days = when (dateRange) {
+            DateRange.WEEK -> 7
+            DateRange.MONTH -> 30
+            DateRange.YEAR -> 365
+        }
+        val resp = plotsApiService.getWeightPlot(days = days)
+        return resp.W_obs.map { Entry(toDaysSinceEpochFromAny(it.time_index), it.value) }
     }
 
     suspend fun getMetabolismData(dateRange: DateRange): List<Entry> {
-        val resp = plotsApiService.getMetabolismPlot()
-        val data = resp.M_base.map { Entry(it.time_index.toFloat(), it.value) }
-        return nonEmptyOrFallback(data, base = 2500f)
+        val days = when (dateRange) {
+            DateRange.WEEK -> 7
+            DateRange.MONTH -> 30
+            DateRange.YEAR -> 365
+        }
+        val resp = plotsApiService.getMetabolismPlot(days = days)
+        return resp.M_base.map { Entry(toDaysSinceEpochFromAny(it.time_index), it.value) }
     }
 
     suspend fun getEnergyBalanceData(dateRange: DateRange): List<Entry> {
-        val resp = plotsApiService.getEnergyBalancePlot()
-        val data = resp.calories_unnorm.map { Entry(it.time_index.toFloat(), it.value) }
-        return nonEmptyOrFallback(data, base = 2200f)
+        val days = when (dateRange) {
+            DateRange.WEEK -> 7
+            DateRange.MONTH -> 30
+            DateRange.YEAR -> 365
+        }
+        val resp = plotsApiService.getEnergyBalancePlot(days = days)
+        return resp.calories_unnorm.map { Entry(toDaysSinceEpochFromAny(it.time_index), it.value) }
     }
 }

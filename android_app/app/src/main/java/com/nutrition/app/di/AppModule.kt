@@ -19,8 +19,10 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import okhttp3.OkHttpClient
+import okhttp3.Dns
 import okhttp3.logging.HttpLoggingInterceptor
 import java.util.concurrent.TimeUnit
+import java.net.Inet4Address
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import javax.inject.Singleton
@@ -79,13 +81,25 @@ object AppModule {
         val logging = HttpLoggingInterceptor().apply {
             setLevel(HttpLoggingInterceptor.Level.BODY)
         }
+        // Prefer IPv4 addresses to avoid potential broken IPv6 paths on some networks
+        val ipv4OnlyDns = object : Dns {
+            override fun lookup(hostname: String): List<java.net.InetAddress> {
+                return try {
+                    Dns.SYSTEM.lookup(hostname).filterIsInstance<Inet4Address>()
+                } catch (_: Exception) {
+                    emptyList()
+                }
+            }
+        }
         return OkHttpClient.Builder()
             .addInterceptor(logging)
             .addInterceptor(ErrorReportingInterceptor())
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(15, TimeUnit.SECONDS)
-            .callTimeout(20, TimeUnit.SECONDS)
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            // No overall call timeout to allow slow cold starts on server
+            .dns(ipv4OnlyDns)
             .retryOnConnectionFailure(true)
+            .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
             .build()
     }
 
