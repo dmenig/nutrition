@@ -384,7 +384,7 @@ async def reload_model(background_tasks: BackgroundTasks):
 app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
 
 
-def get_plot_data(prefer_lightweight: bool = False, last_n: int | None = None):
+def get_plot_data(last_n: int | None = None):
     # Construct plot data strictly from the database (no CSVs in production)
     expected_cols = [
         "W_obs",
@@ -518,34 +518,29 @@ def get_plot_data(prefer_lightweight: bool = False, last_n: int | None = None):
     # Priority (DB-only):
     # - Normal: features from DB + model -> daily summaries -> direct DB agg
     # - Lightweight: daily summaries -> direct DB agg
-    if prefer_lightweight:
-        df = _build_from_daily_summaries()
-        if df.empty:
-            df = _build_from_db_on_the_fly()
-    else:
-        # Try model using DB-derived features
-        features_df = _build_features_from_db()
-        if features_df is not None and not features_df.empty:
-            try:
-                outputs = prediction_service.predict_from_features(features_df)
-                df = pd.DataFrame(
-                    {
-                        "date": features_df["date"],
-                        "W_obs": outputs.get("actual_weight", []),
-                        "W_adj_pred": outputs.get("predicted_adjusted_weight", []),
-                        "M_base": outputs.get("base_metabolism_kcal", []),
-                        "calories": features_df.get("calories", 0),
-                        "sport": features_df.get("sport", 0),
-                    }
-                )
-            except Exception:
-                df = pd.DataFrame()
-        else:
+    # Always try model using DB-derived features first (DL model path)
+    features_df = _build_features_from_db()
+    df = pd.DataFrame()
+    if features_df is not None and not features_df.empty:
+        try:
+            outputs = prediction_service.predict_from_features(features_df)
+            df = pd.DataFrame(
+                {
+                    "date": features_df["date"],
+                    "W_obs": outputs.get("actual_weight", []),
+                    "W_adj_pred": outputs.get("predicted_adjusted_weight", []),
+                    "M_base": outputs.get("base_metabolism_kcal", []),
+                    "calories": features_df.get("calories", 0),
+                    "sport": features_df.get("sport", 0),
+                }
+            )
+        except Exception:
             df = pd.DataFrame()
-        if df.empty:
-            df = _build_from_daily_summaries()
-        if df.empty:
-            df = _build_from_db_on_the_fly()
+    # Safety nets only if DL path failed or produced empty
+    if df.empty:
+        df = _build_from_daily_summaries()
+    if df.empty:
+        df = _build_from_db_on_the_fly()
 
     # Ensure expected columns exist
     for col_name in expected_cols:
@@ -650,8 +645,8 @@ def plots_debug():
 
 
 @app.get("/api/v1/plots/weight", response_model=WeightPlotResponse, tags=["plots"])
-def get_weight_plot_data(simple: bool = False, days: int | None = None):
-    df = get_plot_data(prefer_lightweight=simple, last_n=days)
+def get_weight_plot_data(days: int | None = None):
+    df = get_plot_data(last_n=days)
     # Only include points with meaningful weights (> 0). If none, return empty to allow client fallback.
     w_obs = [
         {"time_index": row["time_index"], "value": float(row["W_obs"])}
@@ -669,8 +664,8 @@ def get_weight_plot_data(simple: bool = False, days: int | None = None):
 @app.get(
     "/api/v1/plots/metabolism", response_model=MetabolismPlotResponse, tags=["plots"]
 )
-def get_metabolism_plot_data(simple: bool = False, days: int | None = None):
-    df = get_plot_data(prefer_lightweight=simple, last_n=days)
+def get_metabolism_plot_data(days: int | None = None):
+    df = get_plot_data(last_n=days)
     m_values = [float(v) for v in df["M_base"].tolist() if pd.notnull(v)]
     # If metabolism is a flat placeholder at 2500 across all points, return empty to allow client fallback
     m_series: list[dict] = []
@@ -688,8 +683,8 @@ def get_metabolism_plot_data(simple: bool = False, days: int | None = None):
     response_model=EnergyBalancePlotResponse,
     tags=["plots"],
 )
-def get_energy_balance_plot_data(simple: bool = False, days: int | None = None):
-    df = get_plot_data(prefer_lightweight=simple, last_n=days)
+def get_energy_balance_plot_data(days: int | None = None):
+    df = get_plot_data(last_n=days)
     return EnergyBalancePlotResponse(
         calories_unnorm=[
             {"time_index": row["time_index"], "value": row["calories_unnorm"]}
@@ -708,8 +703,8 @@ def get_energy_balance_plot_data(simple: bool = False, days: int | None = None):
     response_model=EnergyBalancePlotResponse,
     tags=["plots"],
 )
-def get_energy_balance_plot_data_alias(simple: bool = False, days: int | None = None):
-    return get_energy_balance_plot_data(simple=simple, days=days)
+def get_energy_balance_plot_data_alias(days: int | None = None):
+    return get_energy_balance_plot_data(days=days)
 
 
 @app.get("/plots", tags=["plots"])

@@ -26,19 +26,16 @@ data class EnergyBalancePlotResponse(
 interface PlotsApiService {
     @GET("/api/v1/plots/weight")
     suspend fun getWeightPlot(
-        @Query("simple") simple: Boolean = false,
         @Query("days") days: Int? = null
     ): WeightPlotResponse
 
     @GET("/api/v1/plots/metabolism")
     suspend fun getMetabolismPlot(
-        @Query("simple") simple: Boolean = false,
         @Query("days") days: Int? = null
     ): MetabolismPlotResponse
 
     @GET("/api/v1/plots/energy-balance")
     suspend fun getEnergyBalancePlot(
-        @Query("simple") simple: Boolean = false,
         @Query("days") days: Int? = null
     ): EnergyBalancePlotResponse
 }
