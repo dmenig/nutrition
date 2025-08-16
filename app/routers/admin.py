@@ -7,12 +7,6 @@ from app.db.database import get_db
 from app.db.models import FoodLog, SportActivity, User
 from datetime import datetime, timezone
 from app.services.summary import upsert_daily_summary, backfill_all_summaries
-from app.db.populate_db import (
-    populate_food_table,
-    populate_food_log_table,
-    populate_sport_activities_table,
-    verify_population,
-)
 from sqlalchemy import func
 
 router = APIRouter()
@@ -61,6 +55,12 @@ def backfill_daily_summaries(api_key: str = Depends(get_api_key), db: Session = 
 def populate_all(api_key: str = Depends(get_api_key)):
     """Populate foods, food_logs, and sport_activities from packaged CSVs on the server."""
     try:
+        # Import lazily to avoid heavy deps at router import time
+        from app.db.populate_db import (
+            populate_food_table,
+            populate_food_log_table,
+            populate_sport_activities_table,
+        )
         populate_food_table()
         populate_food_log_table()
         populate_sport_activities_table()
