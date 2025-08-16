@@ -423,6 +423,31 @@ async def get_latest_prediction():
     # 2) Fallback to CSV if present
     results_path = "data/final_results.csv"
     if not os.path.exists(results_path):
+        # 3) Last-resort: derive from get_plot_data so endpoint always returns JSON
+        try:
+            df = get_plot_data()
+            if df is not None and not df.empty:
+                latest_idx = len(df) - 1
+                w_obs = pd.to_numeric(df.get("W_obs", 0), errors="coerce").fillna(0)
+                w_adj = pd.to_numeric(df.get("W_adj_pred", 0), errors="coerce").fillna(0)
+                m_base = pd.to_numeric(df.get("M_base", 0), errors="coerce").fillna(0)
+                outputs = {
+                    "actual_weight": w_obs.tolist(),
+                    "predicted_adjusted_weight": w_adj.tolist(),
+                    "water_retention": (w_obs - w_adj).tolist(),
+                    "base_metabolism_kcal": m_base.tolist(),
+                }
+                return {
+                    "latest": {
+                        "actual_weight": outputs["actual_weight"][latest_idx],
+                        "predicted_adjusted_weight": outputs["predicted_adjusted_weight"][latest_idx],
+                        "water_retention": outputs["water_retention"][latest_idx],
+                        "base_metabolism_kcal": outputs["base_metabolism_kcal"][latest_idx],
+                    },
+                    "series": outputs,
+                }
+        except Exception:
+            pass
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="No DB data or results available yet for prediction.",
