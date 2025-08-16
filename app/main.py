@@ -345,8 +345,8 @@ class PredictionService:
                     self.model.initial_adj_weight,
                     self.normalization_stats,
                 )
-            # Free temporaries aggressively
-            del observed_weights, nutrition_tensor, sport_tensor, base_metabolisms, predicted_observed_weight
+            # Free temporaries aggressively (keep base_metabolisms for downstream conversion)
+            del observed_weights, nutrition_tensor, sport_tensor, predicted_observed_weight
             gc.collect()
 
         # De-normalize outputs
