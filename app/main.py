@@ -353,105 +353,70 @@ async def startup_event():
 
 @app.get("/api/v1/predict/latest", tags=["prediction"])
 async def get_latest_prediction():
-    """Return latest model outputs using DB-derived features (no CSV required).
-
-    Fallback: if DB is empty, try to read `data/final_results.csv` and infer series.
-    """
-    # 1) Try DB-derived features + DL model
+    """Return latest model outputs using DB-derived features only (no fallbacks)."""
+    db = SessionLocal()
     try:
-        db = SessionLocal()
-        try:
-            # Aggregate minimal features per day from DB
-            food_rows = (
-                db.query(
-                    FoodLog.logged_date.label("date"),
-                    func.coalesce(func.sum(FoodLog.calories), 0.0).label("calories"),
-                    func.coalesce(func.sum(FoodLog.carbs), 0.0).label("carbs"),
-                )
-                .group_by(FoodLog.logged_date)
-                .all()
+        # Aggregate minimal features per day from DB
+        date_expr_fl = func.coalesce(FoodLog.logged_date, func.date(FoodLog.logged_at))
+        food_rows = (
+            db.query(
+                date_expr_fl.label("date"),
+                func.coalesce(func.sum(FoodLog.calories), 0.0).label("calories"),
+                func.coalesce(func.sum(FoodLog.carbs), 0.0).label("carbs"),
             )
-            sport_rows = (
-                db.query(
-                    SportActivity.logged_date.label("date"),
-                    func.coalesce(func.sum(SportActivity.calories_expended), 0.0).label("sport"),
-                )
-                .group_by(SportActivity.logged_date)
-                .all()
+            .group_by(date_expr_fl)
+            .all()
+        )
+        date_expr_sa = func.coalesce(SportActivity.logged_date, func.date(SportActivity.logged_at))
+        sport_rows = (
+            db.query(
+                date_expr_sa.label("date"),
+                func.coalesce(func.sum(SportActivity.calories_expended), 0.0).label("sport"),
             )
-        finally:
-            db.close()
+            .group_by(date_expr_sa)
+            .all()
+        )
+    finally:
+        db.close()
 
-        dates = sorted({r.date for r in food_rows} | {r.date for r in sport_rows})
-        if dates:
-            food_by_date = {r.date: r for r in food_rows}
-            sport_by_date = {r.date: r for r in sport_rows}
-            records: list[dict] = []
-            for d in dates:
-                fr = food_by_date.get(d)
-                sr = sport_by_date.get(d)
-                records.append(
-                    {
-                        "date": d,
-                        "calories": float(getattr(fr, "calories", 0.0) or 0.0),
-                        "carbs": float(getattr(fr, "carbs", 0.0) or 0.0),
-                        "sugar": 0.0,
-                        "sel": 0.0,
-                        "alcool": 0.0,
-                        "water": 0.0,
-                        "sport": float(getattr(sr, "sport", 0.0) or 0.0),
-                        # Observed weights unknown in DB; set to 0 for model reconstruction
-                        "pds": 0.0,
-                    }
-                )
-            features_df = pd.DataFrame(records)
-            outputs = prediction_service.predict_from_features(features_df)
-            latest_idx = len(features_df) - 1
-            return {
-                "latest": {
-                    "actual_weight": outputs["actual_weight"][latest_idx],
-                    "predicted_adjusted_weight": outputs["predicted_adjusted_weight"][latest_idx],
-                    "water_retention": outputs["water_retention"][latest_idx],
-                    "base_metabolism_kcal": outputs["base_metabolism_kcal"][latest_idx],
-                },
-                "series": outputs,
-            }
-    except Exception:
-        # Fall back to CSV path below
-        pass
-
-    # 2) Fallback to CSV if present
-    results_path = "data/final_results.csv"
-    if not os.path.exists(results_path):
+    dates = sorted({r.date for r in food_rows} | {r.date for r in sport_rows})
+    if not dates:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="No DB data or results available yet for prediction.",
+            detail="No DB data available for prediction.",
         )
-    df = pd.read_csv(results_path)
-    # Synthesize the expected outputs format from CSV columns if possible
-    # Expect at least W_obs, W_adj_pred, M_base
-    try:
-        latest_idx = len(df) - 1
-        outputs = {
-            "actual_weight": pd.to_numeric(df.get("W_obs", 0), errors="coerce").fillna(0).tolist(),
-            "predicted_adjusted_weight": pd.to_numeric(df.get("W_adj_pred", 0), errors="coerce").fillna(0).tolist(),
-            "water_retention": (
-                pd.to_numeric(df.get("W_obs", 0), errors="coerce").fillna(0)
-                - pd.to_numeric(df.get("W_adj_pred", 0), errors="coerce").fillna(0)
-            ).tolist(),
-            "base_metabolism_kcal": pd.to_numeric(df.get("M_base", 0), errors="coerce").fillna(0).tolist(),
-        }
-        return {
-            "latest": {
-                "actual_weight": outputs["actual_weight"][latest_idx],
-                "predicted_adjusted_weight": outputs["predicted_adjusted_weight"][latest_idx],
-                "water_retention": outputs["water_retention"][latest_idx],
-                "base_metabolism_kcal": outputs["base_metabolism_kcal"][latest_idx],
-            },
-            "series": outputs,
-        }
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to prepare latest prediction: {exc}")
+    food_by_date = {r.date: r for r in food_rows}
+    sport_by_date = {r.date: r for r in sport_rows}
+    records: list[dict] = []
+    for d in dates:
+        fr = food_by_date.get(d)
+        sr = sport_by_date.get(d)
+        records.append(
+            {
+                "date": d,
+                "calories": float(getattr(fr, "calories", 0.0) or 0.0),
+                "carbs": float(getattr(fr, "carbs", 0.0) or 0.0),
+                "sugar": 0.0,
+                "sel": 0.0,
+                "alcool": 0.0,
+                "water": 0.0,
+                "sport": float(getattr(sr, "sport", 0.0) or 0.0),
+                # Observed weights unknown in DB; set to 0 for model reconstruction
+                "pds": 0.0,
+            }
+        )
+    features_df = pd.DataFrame(records)
+    outputs = prediction_service.predict_from_features(features_df)
+    latest_idx = len(features_df) - 1
+    return {
+        "latest": {
+            "actual_weight": outputs["actual_weight"][latest_idx],
+            "predicted_adjusted_weight": outputs["predicted_adjusted_weight"][latest_idx],
+            "water_retention": outputs["water_retention"][latest_idx],
+            "base_metabolism_kcal": outputs["base_metabolism_kcal"][latest_idx],
+        },
+        "series": outputs,
+    }
 
 
 @app.post("/api/v1/predict/reload-model", tags=["prediction"])
@@ -493,8 +458,8 @@ def get_plot_data(last_n: int | None = None):
             # Fill required columns (leave weights empty if unknown)
             df["W_obs"] = pd.Series(dtype=float)
             df["W_adj_pred"] = pd.Series(dtype=float)
-            # Keep date for downstream time_index construction
-            return df[["date", *expected_cols]]
+            # Keep date for downstream time_index construction; do not slice yet
+            return df
         finally:
             db.close()
 
@@ -539,7 +504,7 @@ def get_plot_data(last_n: int | None = None):
             df = pd.DataFrame(records)
             df["W_obs"] = pd.Series(dtype=float)
             df["W_adj_pred"] = pd.Series(dtype=float)
-            return df[["date", *expected_cols]]
+            return df
         finally:
             db.close()
 
@@ -548,21 +513,23 @@ def get_plot_data(last_n: int | None = None):
         db = SessionLocal()
         try:
             # Aggregate per day calories and carbs; set other nutrition features to 0
+            date_expr_fl = func.coalesce(FoodLog.logged_date, func.date(FoodLog.logged_at))
             food_rows = (
                 db.query(
-                    FoodLog.logged_date.label("date"),
+                    date_expr_fl.label("date"),
                     func.coalesce(func.sum(FoodLog.calories), 0.0).label("calories"),
                     func.coalesce(func.sum(FoodLog.carbs), 0.0).label("carbs"),
                 )
-                .group_by(FoodLog.logged_date)
+                .group_by(date_expr_fl)
                 .all()
             )
+            date_expr_sa = func.coalesce(SportActivity.logged_date, func.date(SportActivity.logged_at))
             sport_rows = (
                 db.query(
-                    SportActivity.logged_date.label("date"),
+                    date_expr_sa.label("date"),
                     func.coalesce(func.sum(SportActivity.calories_expended), 0.0).label("sport"),
                 )
-                .group_by(SportActivity.logged_date)
+                .group_by(date_expr_sa)
                 .all()
             )
             dates = sorted({r.date for r in food_rows} | {r.date for r in sport_rows})
@@ -613,6 +580,7 @@ def get_plot_data(last_n: int | None = None):
             )
         except Exception:
             df = pd.DataFrame()
+    # No fallbacks when enforcing DL-only path
     # Safety nets only if DL path failed or produced empty
     if df.empty:
         df = _build_from_daily_summaries()
@@ -623,6 +591,9 @@ def get_plot_data(last_n: int | None = None):
     for col_name in expected_cols:
         if col_name not in df.columns:
             df[col_name] = pd.Series(dtype=float)
+    # Keep only relevant columns plus date if present
+    keep_cols = [c for c in (["date"] + expected_cols) if c in df.columns]
+    df = df[keep_cols]
     # Coerce numeric types. Do NOT fill missing weights with zeros; keep NaN to signal "unknown".
     for col_name in ["calories", "sport", "M_base"]:
         df[col_name] = pd.to_numeric(df[col_name], errors="coerce").fillna(0)
@@ -694,8 +665,13 @@ def get_plot_data(last_n: int | None = None):
 
 @app.get("/api/v1/plots/debug", tags=["plots"])
 def plots_debug():
+    from urllib.parse import urlparse
+    db_url = os.environ.get("DATABASE_URL", "")
+    parsed = urlparse(db_url) if db_url else None
+    host = parsed.hostname if parsed else None
     debug = {
         "cwd": str(pathlib.Path.cwd()),
+        "db_host": host,
         "db_daily_summaries": 0,
         "db_food_days": 0,
         "db_sport_days": 0,
@@ -706,8 +682,10 @@ def plots_debug():
         db = SessionLocal()
         try:
             debug["db_daily_summaries"] = int(db.query(func.count(DailySummary.id)).scalar() or 0)
-            debug["db_food_days"] = int(db.query(func.count(func.distinct(FoodLog.logged_date))).scalar() or 0)
-            debug["db_sport_days"] = int(db.query(func.count(func.distinct(SportActivity.logged_date))).scalar() or 0)
+            dfl = func.coalesce(FoodLog.logged_date, func.date(FoodLog.logged_at))
+            dsa = func.coalesce(SportActivity.logged_date, func.date(SportActivity.logged_at))
+            debug["db_food_days"] = int(db.query(func.count(func.distinct(dfl))).scalar() or 0)
+            debug["db_sport_days"] = int(db.query(func.count(func.distinct(dsa))).scalar() or 0)
         finally:
             db.close()
     except Exception as e:
