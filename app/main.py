@@ -493,8 +493,8 @@ def get_plot_data(last_n: int | None = None):
             # Fill required columns (leave weights empty if unknown)
             df["W_obs"] = pd.Series(dtype=float)
             df["W_adj_pred"] = pd.Series(dtype=float)
-            # Keep date for downstream time_index construction
-            return df[["date", *expected_cols]]
+            # Keep date for downstream time_index construction; do not slice yet
+            return df
         finally:
             db.close()
 
@@ -539,7 +539,7 @@ def get_plot_data(last_n: int | None = None):
             df = pd.DataFrame(records)
             df["W_obs"] = pd.Series(dtype=float)
             df["W_adj_pred"] = pd.Series(dtype=float)
-            return df[["date", *expected_cols]]
+            return df
         finally:
             db.close()
 
@@ -623,6 +623,9 @@ def get_plot_data(last_n: int | None = None):
     for col_name in expected_cols:
         if col_name not in df.columns:
             df[col_name] = pd.Series(dtype=float)
+    # Keep only relevant columns plus date if present
+    keep_cols = [c for c in (["date"] + expected_cols) if c in df.columns]
+    df = df[keep_cols]
     # Coerce numeric types. Do NOT fill missing weights with zeros; keep NaN to signal "unknown".
     for col_name in ["calories", "sport", "M_base"]:
         df[col_name] = pd.to_numeric(df[col_name], errors="coerce").fillna(0)
