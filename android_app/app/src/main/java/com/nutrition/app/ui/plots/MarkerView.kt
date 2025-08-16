@@ -19,14 +19,16 @@ class CustomMarkerView(context: Context, layoutResource: Int) : MarkerView(conte
         tvContent = findViewById(R.id.tvContent)
     }
 
-    private val dateFormat = SimpleDateFormat("MMM dd, yyyy HH:mm", Locale.getDefault())
+    private val dateFormat = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
 
     // callbacks everytime the MarkerView is redrawn, can be used to update the
     // content (user-interface)
     override fun refreshContent(e: Entry, highlight: Highlight) {
-        val timestamp = e.x.toLong()
+        // X is encoded as days since epoch; convert to milliseconds for formatting
+        val daysSinceEpoch = e.x.toDouble()
+        val epochMs = (daysSinceEpoch * 86_400_000.0).toLong()
         val value = e.y
-        tvContent.text = "${dateFormat.format(Date(timestamp))}\nValue: ${"%.2f".format(value)}"
+        tvContent.text = "${dateFormat.format(Date(epochMs))}\nValue: ${"%.2f".format(value)}"
         super.refreshContent(e, highlight)
     }
 

@@ -120,11 +120,14 @@ fun LineChartComposable(plotType: String, viewModel: PlotsViewModel = hiltViewMo
 
                 xAxis.position = XAxis.XAxisPosition.BOTTOM
                 xAxis.setDrawGridLines(false)
+                xAxis.granularity = 1f
+                xAxis.labelCount = 4
                 // ValueFormatter expects X in days-since-epoch; convert back to ms for formatting
                 xAxis.valueFormatter = object : ValueFormatter() {
                     private val format = SimpleDateFormat("MMM dd", Locale.getDefault())
                     override fun getFormattedValue(value: Float): String {
-                        val epochMs = (value * 86_400_000.0f).toLong()
+                        val days = value.toDouble()
+                        val epochMs = (days * 86_400_000.0).toLong()
                         return format.format(Date(epochMs))
                     }
                 }

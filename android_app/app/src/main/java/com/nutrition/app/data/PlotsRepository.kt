@@ -4,6 +4,7 @@ import com.nutrition.app.data.DateRange
 import com.github.mikephil.charting.data.Entry
 import javax.inject.Inject
 import javax.inject.Singleton
+import android.util.Log
 
 @Singleton
 class PlotsRepository @Inject constructor(
@@ -39,7 +40,14 @@ class PlotsRepository @Inject constructor(
         }
         val resp = plotsApiService.getWeightPlot(days = days)
         val series = if (resp.W_obs.isNotEmpty()) resp.W_obs else resp.W_adj_pred
-        return series.map { Entry(toDaysSinceEpochFromAny(it.time_index), it.value) }
+        val entries = series.map { Entry(toDaysSinceEpochFromAny(it.time_index), it.value) }
+        if (entries.isNotEmpty()) {
+            val preview = entries.take(3).joinToString { "(${it.x}, ${it.y})" }
+            Log.d("PlotsRepository", "Weight entries preview: $preview")
+        } else {
+            Log.d("PlotsRepository", "Weight entries empty")
+        }
+        return entries
     }
 
     suspend fun getMetabolismData(dateRange: DateRange): List<Entry> {
