@@ -811,9 +811,14 @@ def get_weight_plot_data(days: int | None = None):
     features_df = pd.DataFrame(recs)
     try:
         outs = prediction_service.predict_from_features(features_df)
-    except Exception:
-        # If model path fails (e.g., missing npz/params), return empty series gracefully
-        return WeightPlotResponse(W_obs=[], W_adj_pred=[])
+    except Exception as e:
+        # Surface a clearer upstream error to clients instead of a generic 500
+        msg = str(e)
+        if "NumPy weights not loaded" in msg or "Failed to load NumPy weights" in msg:
+            raise HTTPException(status_code=503, detail="Model unavailable: NumPy weights missing or unreadable")
+        if "connection" in msg.lower() or "db" in msg.lower():
+            raise HTTPException(status_code=502, detail="Upstream data unavailable (DB/connection)")
+        raise HTTPException(status_code=500, detail=f"Prediction failed: {msg}")
     # Build epoch ms time_index from dates (normalized to UTC at day start)
     dt = pd.to_datetime(features_df["date"], errors="coerce").dt.tz_localize("UTC", nonexistent="shift_forward", ambiguous="NaT", errors="coerce")
     dt = dt.dt.normalize()
