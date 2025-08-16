@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from fastapi.security import APIKeyHeader
 from app.core.config import settings
 from app.jobs.retrain_model import retrain_model_job
@@ -10,6 +10,9 @@ from app.services.summary import upsert_daily_summary, backfill_all_summaries
 from sqlalchemy import func
 
 router = APIRouter()
+
+# In-process status for background jobs
+POPULATE_STATUS: dict = {"state": "idle", "error": None, "counts": {}}
 
 # Define API key security scheme
 api_key_header = APIKeyHeader(name="X-API-Key")
@@ -77,3 +80,46 @@ def populate_all(api_key: str = Depends(get_api_key)):
         return {"foods": int(foods), "food_logs": int(logs), "sport_activities": int(sports)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Populate failed: {e}")
+
+
+def _populate_job_impl() -> None:
+    global POPULATE_STATUS
+    POPULATE_STATUS = {"state": "running", "error": None, "counts": {}}
+    try:
+        from app.db.populate_db import (
+            populate_food_table,
+            populate_food_log_table,
+            populate_sport_activities_table,
+        )
+        populate_food_table()
+        populate_food_log_table()
+        populate_sport_activities_table()
+        # Summarize counts
+        from sqlalchemy import text as _text
+        from app.db.database import SessionLocal as _Sess
+        sess = _Sess()
+        try:
+            foods = sess.execute(_text("SELECT COUNT(*) FROM foods")).scalar() or 0
+            logs = sess.execute(_text("SELECT COUNT(*) FROM food_logs")).scalar() or 0
+            sports = sess.execute(_text("SELECT COUNT(*) FROM sport_activities")).scalar() or 0
+        finally:
+            sess.close()
+        POPULATE_STATUS = {
+            "state": "done",
+            "error": None,
+            "counts": {"foods": int(foods), "food_logs": int(logs), "sport_activities": int(sports)},
+        }
+    except Exception as exc:
+        POPULATE_STATUS = {"state": "error", "error": str(exc), "counts": {}}
+
+
+@router.post("/populate-async", status_code=status.HTTP_202_ACCEPTED)
+def populate_all_async(background_tasks: BackgroundTasks, api_key: str = Depends(get_api_key)):
+    """Trigger population in the background to avoid request timeouts on Render free tier."""
+    background_tasks.add_task(_populate_job_impl)
+    return {"accepted": True}
+
+
+@router.get("/populate/status", status_code=status.HTTP_200_OK)
+def populate_status(api_key: str = Depends(get_api_key)):
+    return POPULATE_STATUS
