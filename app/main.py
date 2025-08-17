@@ -234,7 +234,7 @@ class PredictionService:
         base_metabolisms = self.np_model.forward(features)
         return base_metabolisms.squeeze().tolist()
 
-    def predict_from_features(self, features_df: pd.DataFrame):
+    def predict_from_features(self, features_df: pd.DataFrame, backend: str | None = None):
         # Ensure normalization params are loaded
         self._ensure_normalization_stats_loaded()
         # Ensure required columns and numeric types
@@ -256,7 +256,8 @@ class PredictionService:
         weight_mean = float(self.normalization_stats.get("pds", {}).get("mean", 0.0) or 0.0)
         norm_df["pds_normalized"] = norm_df["pds"] - weight_mean
 
-        if self._should_use_numpy():
+        use_numpy = self._should_use_numpy() if backend is None else (backend.lower() == "numpy")
+        if use_numpy:
             # NumPy path (lazy load)
             if self.np_model is None:
                 from app.np_infer import load_numpy_weights, NumpyFinalModel  # noqa: WPS433
@@ -364,7 +365,7 @@ async def startup_event():
 
 
 @app.get("/api/v1/predict/latest", tags=["prediction"])
-async def get_latest_prediction(source: str | None = None):
+async def get_latest_prediction(source: str | None = None, backend: str | None = None):
     """Return latest model outputs.
 
     - source=db (default): build features from DB aggregates
@@ -458,7 +459,7 @@ async def get_latest_prediction(source: str | None = None):
                 }
             )
         features_df = pd.DataFrame(records)
-    outputs = prediction_service.predict_from_features(features_df)
+    outputs = prediction_service.predict_from_features(features_df, backend=backend)
     latest_idx = len(features_df) - 1
     return {
         "latest": {
