@@ -686,6 +686,8 @@ def plots_debug():
         "db_daily_summaries": 0,
         "db_food_days": 0,
         "db_sport_days": 0,
+        "db_weight_days": 0,
+        "db_weight_rows": 0,
         "final_rows": 0,
         "final_cols": [],
     }
@@ -697,6 +699,9 @@ def plots_debug():
             dsa = func.coalesce(SportActivity.logged_date, func.date(SportActivity.logged_at))
             debug["db_food_days"] = int(db.query(func.count(func.distinct(dfl))).scalar() or 0)
             debug["db_sport_days"] = int(db.query(func.count(func.distinct(dsa))).scalar() or 0)
+            dwt = func.coalesce(WeightLog.logged_date, func.date(WeightLog.logged_at))
+            debug["db_weight_days"] = int(db.query(func.count(func.distinct(dwt))).scalar() or 0)
+            debug["db_weight_rows"] = int(db.query(func.count(WeightLog.id)).scalar() or 0)
         finally:
             db.close()
     except Exception as e:
