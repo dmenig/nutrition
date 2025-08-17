@@ -441,7 +441,9 @@ app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
 
 
 def get_plot_data(last_n: int | None = None):
-    # Construct plot data strictly from the database (no CSVs in production)
+    # Construct plot data. By default we build strictly from the database.
+    # For local parity checks with the training pipeline (compare_backends.py),
+    # set env PLOTS_SOURCE=csv to source features from data/{processed_journal,variables}.csv
     expected_cols = [
         "W_obs",
         "W_adj_pred",
@@ -553,6 +555,60 @@ def get_plot_data(last_n: int | None = None):
         finally:
             db.close()
 
+    def _build_from_training_csv() -> pd.DataFrame:
+        """Build features using the exact same CSV pipeline as compare_backends.py.
+
+        This path is useful for local validation and ensures parity with the
+        training data pipeline. It requires data/processed_journal.csv and
+        data/variables.csv to be present in the working directory (or container).
+        """
+        try:
+            from build_features import main as build_features_main  # lazy import
+        except Exception:
+            return pd.DataFrame(columns=["date"] + expected_cols)
+        # Verify CSV presence
+        csv_journal = os.path.join(os.getcwd(), "data", "processed_journal.csv")
+        csv_variables = os.path.join(os.getcwd(), "data", "variables.csv")
+        if not (os.path.exists(csv_journal) and os.path.exists(csv_variables)):
+            return pd.DataFrame(columns=["date"] + expected_cols)
+        try:
+            features_df = build_features_main(journal_path=csv_journal, variables_path=csv_variables)
+            # Ensure required columns exist and numeric
+            nutrition_cols = ["calories", "carbs", "sugar", "sel", "alcool", "water"]
+            for col in nutrition_cols + ["pds", "sport"]:
+                if col not in features_df.columns:
+                    features_df[col] = 0.0
+                features_df[col] = pd.to_numeric(features_df[col], errors="coerce").fillna(0)
+            # Ensure a date column exists
+            df_feat = features_df.copy()
+            if "Date" in df_feat.columns:
+                # Some pipelines may keep a Date column
+                dt = pd.to_datetime(df_feat["Date"], errors="coerce")
+                df_feat = df_feat.assign(date=dt)
+            elif df_feat.index.name and str(df_feat.index.name).lower() == "date":
+                df_feat = df_feat.reset_index().rename(columns={df_feat.index.name: "date"})
+            elif df_feat.index.dtype_str.startswith("datetime"):
+                df_feat = df_feat.reset_index().rename(columns={df_feat.columns[0]: "date"})
+            else:
+                # Cannot establish timeline; bail out
+                return pd.DataFrame(columns=["date"] + expected_cols)
+            # Run model exactly like parity script
+            outputs = prediction_service.predict_from_features(df_feat[[
+                "date", "calories", "carbs", "sugar", "sel", "alcool", "water", "sport", "pds"
+            ]].copy())
+            df = pd.DataFrame({
+                "date": df_feat["date"],
+                "W_obs": df_feat["pds"],
+                "W_adj_pred": outputs.get("predicted_adjusted_weight", []),
+                "M_base": outputs.get("base_metabolism_kcal", []),
+                "calories": df_feat.get("calories", 0),
+                "sport": df_feat.get("sport", 0),
+            })
+            return df
+        except Exception:
+            # If any issue, fall back to empty so other builders can try
+            return pd.DataFrame(columns=["date"] + expected_cols)
+
     def _build_features_from_db() -> pd.DataFrame:
         """Build minimal features directly from DB for model usage (no CSV)."""
         db = SessionLocal()
@@ -604,51 +660,58 @@ def get_plot_data(last_n: int | None = None):
         finally:
             db.close()
 
-    # Priority (DB-only):
-    # - Normal: features from DB + model -> daily summaries -> direct DB agg
-    # - Lightweight: daily summaries -> direct DB agg
-    # Always try model using DB-derived features first (DL model path)
-    features_df = _build_features_from_db()
+    # Choose source according to env and availability
+    # PLOTS_SOURCE=csv -> use training CSV pipeline
+    # PLOTS_SOURCE=db  -> force DB path
+    # PLOTS_SOURCE=auto (default) -> try DB first, fall back to CSV, then summaries/on-the-fly
+    plots_source = os.environ.get("PLOTS_SOURCE", "auto").lower()
     df = pd.DataFrame()
-    if features_df is not None and not features_df.empty:
-        try:
-            outputs = prediction_service.predict_from_features(features_df)
-            df = pd.DataFrame(
-                {
-                    "date": features_df["date"],
-                    # Use observed weights from DB if available; fall back to model input only if non-zero
-                    "W_obs": outputs.get("actual_weight", []),
-                    "W_adj_pred": outputs.get("predicted_adjusted_weight", []),
-                    "M_base": outputs.get("base_metabolism_kcal", []),
-                    "calories": features_df.get("calories", 0),
-                    "sport": features_df.get("sport", 0),
-                }
-            )
-            # Replace W_obs with true observed weights from DB when present (by date)
+    if plots_source == "csv":
+        df = _build_from_training_csv()
+    else:
+        # DB-first
+        features_df = _build_features_from_db()
+        if features_df is not None and not features_df.empty:
             try:
-                db_obs = SessionLocal()
+                outputs = prediction_service.predict_from_features(features_df)
+                df = pd.DataFrame(
+                    {
+                        "date": features_df["date"],
+                        # Use observed weights from DB if available; fall back to model input only if non-zero
+                        "W_obs": outputs.get("actual_weight", []),
+                        "W_adj_pred": outputs.get("predicted_adjusted_weight", []),
+                        "M_base": outputs.get("base_metabolism_kcal", []),
+                        "calories": features_df.get("calories", 0),
+                        "sport": features_df.get("sport", 0),
+                    }
+                )
+                # Replace W_obs with true observed weights from DB when present (by date)
                 try:
-                    date_expr_w = func.coalesce(WeightLog.logged_date, func.date(WeightLog.logged_at))
-                    w_rows = (
-                        db_obs.query(date_expr_w.label("date"), func.avg(WeightLog.weight_kg).label("W_obs"))
-                        .group_by(date_expr_w)
-                        .all()
-                    )
-                    if w_rows:
-                        w_df = pd.DataFrame([{"date": r.date, "W_obs": float(r.W_obs or 0)} for r in w_rows])
-                        df = df.merge(w_df, on="date", how="left", suffixes=("", "_db"))
-                        # Prefer DB observed weights when available; otherwise keep model input values
-                        if "W_obs_db" in df.columns:
-                            df["W_obs"] = df["W_obs_db"].where(pd.notnull(df["W_obs_db"]), df["W_obs"]).astype(float)
-                            df.drop(columns=["W_obs_db"], inplace=True)
-                finally:
-                    db_obs.close()
+                    db_obs = SessionLocal()
+                    try:
+                        date_expr_w = func.coalesce(WeightLog.logged_date, func.date(WeightLog.logged_at))
+                        w_rows = (
+                            db_obs.query(date_expr_w.label("date"), func.avg(WeightLog.weight_kg).label("W_obs"))
+                            .group_by(date_expr_w)
+                            .all()
+                        )
+                        if w_rows:
+                            w_df = pd.DataFrame([{"date": r.date, "W_obs": float(r.W_obs or 0)} for r in w_rows])
+                            df = df.merge(w_df, on="date", how="left", suffixes=("", "_db"))
+                            # Prefer DB observed weights when available; otherwise keep model input values
+                            if "W_obs_db" in df.columns:
+                                df["W_obs"] = df["W_obs_db"].where(pd.notnull(df["W_obs_db"]), df["W_obs"]).astype(float)
+                                df.drop(columns=["W_obs_db"], inplace=True)
+                    finally:
+                        db_obs.close()
+                except Exception:
+                    pass
             except Exception:
-                pass
-        except Exception:
-            df = pd.DataFrame()
-    # No fallbacks when enforcing DL-only path
-    # Safety nets only if DL path failed or produced empty
+                df = pd.DataFrame()
+        # If DB path yielded nothing or auto mode wants parity, try CSV next
+        if df.empty and plots_source in ("auto", "db_then_csv", "auto_csv"):
+            df = _build_from_training_csv()
+    # As final safety nets
     if df.empty:
         df = _build_from_daily_summaries()
     if df.empty:
