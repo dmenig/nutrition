@@ -344,6 +344,10 @@ prediction_service = PredictionService()
 _PLOT_CACHE_LOCK: Lock = Lock()
 _PLOT_CACHE_DF: pd.DataFrame | None = None
 
+# In-memory prediction cache keyed by source (e.g., 'csv', 'db') to avoid recomputation
+_PREDICT_CACHE_LOCK: Lock = Lock()
+_PREDICT_CACHE: dict[str, dict] = {}
+
 
 @app.on_event("startup")
 async def startup_event():
@@ -372,7 +376,26 @@ async def get_latest_prediction(source: str | None = None, backend: str | None =
     - source=csv: build features from training CSVs (parity with compare_backends)
     - source=auto: same as db for this endpoint
     """
-    if (source or "db").lower() == "csv":
+    src_key = (source or "db").lower()
+    if src_key == "csv":
+        # Return from cache if available
+        try:
+            with _PREDICT_CACHE_LOCK:
+                cached = _PREDICT_CACHE.get(src_key)
+            if cached is not None and isinstance(cached.get("outputs"), dict):
+                outputs = cached["outputs"]
+                latest_idx = int(cached.get("latest_idx", len(outputs.get("base_metabolism_kcal", [])) - 1))
+                return {
+                    "latest": {
+                        "actual_weight": outputs["actual_weight"][latest_idx],
+                        "predicted_adjusted_weight": outputs["predicted_adjusted_weight"][latest_idx],
+                        "water_retention": outputs["water_retention"][latest_idx],
+                        "base_metabolism_kcal": outputs["base_metabolism_kcal"][latest_idx],
+                    },
+                    "series": outputs,
+                }
+        except Exception:
+            pass
         try:
             from build_features import main as build_features_main
         except Exception as e:
@@ -419,7 +442,20 @@ async def get_latest_prediction(source: str | None = None, backend: str | None =
                         f.write(rv.content)
                     raw_df = build_features_main(journal_path=jp, variables_path=vp)
             else:
-                raw_df = build_features_main(journal_path=csv_journal, variables_path=csv_variables)
+                # Prefer a precomputed features CSV if present to avoid heavy recomputation on small instances
+                try:
+                    feat_csv = None
+                    for root in [os.getcwd(), "/app", str(pathlib.Path(__file__).resolve().parents[1]), str(pathlib.Path(__file__).resolve().parents[2])]:
+                        candidate = os.path.join(root, "data", "features.csv")
+                        if os.path.exists(candidate):
+                            feat_csv = candidate
+                            break
+                    if feat_csv is not None:
+                        raw_df = pd.read_csv(feat_csv)
+                    else:
+                        raw_df = build_features_main(journal_path=csv_journal, variables_path=csv_variables)
+                except Exception:
+                    raw_df = build_features_main(journal_path=csv_journal, variables_path=csv_variables)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to build CSV features: {e}")
         df_feat = raw_df.copy()
@@ -435,6 +471,12 @@ async def get_latest_prediction(source: str | None = None, backend: str | None =
                 df_feat[col] = 0.0
             df_feat[col] = pd.to_numeric(df_feat[col], errors="coerce").fillna(0)
         features_df = df_feat[["date", "calories", "carbs", "sugar", "sel", "alcool", "water", "sport", "pds"]]
+        # Cache inputs to speed subsequent requests
+        try:
+            with _PREDICT_CACHE_LOCK:
+                _PREDICT_CACHE[src_key] = {"features_df_head": features_df.head(1).to_dict(), "ts": pd.Timestamp.utcnow().isoformat()}
+        except Exception:
+            pass
     else:
         db = SessionLocal()
         try:
@@ -485,6 +527,17 @@ async def get_latest_prediction(source: str | None = None, backend: str | None =
             )
         features_df = pd.DataFrame(records)
     outputs = prediction_service.predict_from_features(features_df, backend=backend)
+    # Populate cache for CSV source
+    try:
+        if src_key == "csv":
+            with _PREDICT_CACHE_LOCK:
+                _PREDICT_CACHE[src_key] = {
+                    "outputs": outputs,
+                    "latest_idx": len(features_df) - 1,
+                    "ts": pd.Timestamp.utcnow().isoformat(),
+                }
+    except Exception:
+        pass
     latest_idx = len(features_df) - 1
     return {
         "latest": {
