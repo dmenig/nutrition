@@ -364,60 +364,88 @@ async def startup_event():
 
 
 @app.get("/api/v1/predict/latest", tags=["prediction"])
-async def get_latest_prediction():
-    """Return latest model outputs using DB-derived features only (no fallbacks)."""
-    db = SessionLocal()
-    try:
-        # Aggregate minimal features per day from DB
-        date_expr_fl = func.coalesce(FoodLog.logged_date, func.date(FoodLog.logged_at))
-        food_rows = (
-            db.query(
-                date_expr_fl.label("date"),
-                func.coalesce(func.sum(FoodLog.calories), 0.0).label("calories"),
-                func.coalesce(func.sum(FoodLog.carbs), 0.0).label("carbs"),
-            )
-            .group_by(date_expr_fl)
-            .all()
-        )
-        date_expr_sa = func.coalesce(SportActivity.logged_date, func.date(SportActivity.logged_at))
-        sport_rows = (
-            db.query(
-                date_expr_sa.label("date"),
-                func.coalesce(func.sum(SportActivity.calories_expended), 0.0).label("sport"),
-            )
-            .group_by(date_expr_sa)
-            .all()
-        )
-    finally:
-        db.close()
+async def get_latest_prediction(source: str | None = None):
+    """Return latest model outputs.
 
-    dates = sorted({r.date for r in food_rows} | {r.date for r in sport_rows})
-    if not dates:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="No DB data available for prediction.",
-        )
-    food_by_date = {r.date: r for r in food_rows}
-    sport_by_date = {r.date: r for r in sport_rows}
-    records: list[dict] = []
-    for d in dates:
-        fr = food_by_date.get(d)
-        sr = sport_by_date.get(d)
-        records.append(
-            {
-                "date": d,
-                "calories": float(getattr(fr, "calories", 0.0) or 0.0),
-                "carbs": float(getattr(fr, "carbs", 0.0) or 0.0),
-                "sugar": 0.0,
-                "sel": 0.0,
-                "alcool": 0.0,
-                "water": 0.0,
-                "sport": float(getattr(sr, "sport", 0.0) or 0.0),
-                # Observed weights unknown in DB; set to 0 for model reconstruction
-                "pds": 0.0,
-            }
-        )
-    features_df = pd.DataFrame(records)
+    - source=db (default): build features from DB aggregates
+    - source=csv: build features from training CSVs (parity with compare_backends)
+    - source=auto: same as db for this endpoint
+    """
+    if (source or "db").lower() == "csv":
+        try:
+            from build_features import main as build_features_main
+        except Exception as e:
+            raise HTTPException(status_code=503, detail=f"CSV features unavailable: {e}")
+        csv_journal = os.path.join(os.getcwd(), "data", "processed_journal.csv")
+        csv_variables = os.path.join(os.getcwd(), "data", "variables.csv")
+        if not (os.path.exists(csv_journal) and os.path.exists(csv_variables)):
+            raise HTTPException(status_code=503, detail="CSV features missing in data/ directory")
+        try:
+            raw_df = build_features_main(journal_path=csv_journal, variables_path=csv_variables)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to build CSV features: {e}")
+        df_feat = raw_df.copy()
+        if "Date" in df_feat.columns:
+            dt = pd.to_datetime(df_feat["Date"], errors="coerce")
+            df_feat = df_feat.assign(date=dt)
+        elif df_feat.index.dtype_str.startswith("datetime"):
+            df_feat = df_feat.reset_index().rename(columns={df_feat.columns[0]: "date"})
+        else:
+            raise HTTPException(status_code=500, detail="CSV features missing Date index/column")
+        for col in ["calories", "carbs", "sugar", "sel", "alcool", "water", "sport", "pds"]:
+            if col not in df_feat.columns:
+                df_feat[col] = 0.0
+            df_feat[col] = pd.to_numeric(df_feat[col], errors="coerce").fillna(0)
+        features_df = df_feat[["date", "calories", "carbs", "sugar", "sel", "alcool", "water", "sport", "pds"]]
+    else:
+        db = SessionLocal()
+        try:
+            # Aggregate minimal features per day from DB
+            date_expr_fl = func.coalesce(FoodLog.logged_date, func.date(FoodLog.logged_at))
+            food_rows = (
+                db.query(
+                    date_expr_fl.label("date"),
+                    func.coalesce(func.sum(FoodLog.calories), 0.0).label("calories"),
+                    func.coalesce(func.sum(FoodLog.carbs), 0.0).label("carbs"),
+                )
+                .group_by(date_expr_fl)
+                .all()
+            )
+            date_expr_sa = func.coalesce(SportActivity.logged_date, func.date(SportActivity.logged_at))
+            sport_rows = (
+                db.query(
+                    date_expr_sa.label("date"),
+                    func.coalesce(func.sum(SportActivity.calories_expended), 0.0).label("sport"),
+                )
+                .group_by(date_expr_sa)
+                .all()
+            )
+        finally:
+            db.close()
+        dates = sorted({r.date for r in food_rows} | {r.date for r in sport_rows})
+        if not dates:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="No DB data available for prediction.")
+        food_by_date = {r.date: r for r in food_rows}
+        sport_by_date = {r.date: r for r in sport_rows}
+        records: list[dict] = []
+        for d in dates:
+            fr = food_by_date.get(d)
+            sr = sport_by_date.get(d)
+            records.append(
+                {
+                    "date": d,
+                    "calories": float(getattr(fr, "calories", 0.0) or 0.0),
+                    "carbs": float(getattr(fr, "carbs", 0.0) or 0.0),
+                    "sugar": 0.0,
+                    "sel": 0.0,
+                    "alcool": 0.0,
+                    "water": 0.0,
+                    "sport": float(getattr(sr, "sport", 0.0) or 0.0),
+                    # Observed weights unknown in DB; set to 0 for model reconstruction
+                    "pds": 0.0,
+                }
+            )
+        features_df = pd.DataFrame(records)
     outputs = prediction_service.predict_from_features(features_df)
     latest_idx = len(features_df) - 1
     return {
@@ -440,7 +468,7 @@ async def reload_model(background_tasks: BackgroundTasks):
 app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
 
 
-def get_plot_data(last_n: int | None = None):
+def get_plot_data(last_n: int | None = None, source: str | None = None):
     # Construct plot data. By default we build strictly from the database.
     # For local parity checks with the training pipeline (compare_backends.py),
     # set env PLOTS_SOURCE=csv to source features from data/{processed_journal,variables}.csv
@@ -664,7 +692,7 @@ def get_plot_data(last_n: int | None = None):
     # PLOTS_SOURCE=csv -> use training CSV pipeline
     # PLOTS_SOURCE=db  -> force DB path
     # PLOTS_SOURCE=auto (default) -> try DB first, fall back to CSV, then summaries/on-the-fly
-    plots_source = os.environ.get("PLOTS_SOURCE", "auto").lower()
+    plots_source = (source or os.environ.get("PLOTS_SOURCE", "auto")).lower()
     df = pd.DataFrame()
     if plots_source == "csv":
         df = _build_from_training_csv()
@@ -945,8 +973,8 @@ def plots_debug():
 
 
 @app.get("/api/v1/plots/weight", response_model=WeightPlotResponse, tags=["plots"])
-def get_weight_plot_data(days: int | None = None):
-    df = get_plot_data(last_n=days)
+def get_weight_plot_data(days: int | None = None, source: str | None = None):
+    df = get_plot_data(last_n=days, source=source)
     # Enforce presence of observed weights; no fallback
     # Only include observed weights that are non-null and non-zero
     w_obs = [
@@ -967,8 +995,8 @@ def get_weight_plot_data(days: int | None = None):
 @app.get(
     "/api/v1/plots/metabolism", response_model=MetabolismPlotResponse, tags=["plots"]
 )
-def get_metabolism_plot_data(days: int | None = None):
-    df = get_plot_data(last_n=days)
+def get_metabolism_plot_data(days: int | None = None, source: str | None = None):
+    df = get_plot_data(last_n=days, source=source)
     m_values = [float(v) for v in df["M_base"].tolist() if pd.notnull(v)]
     # If metabolism is a flat placeholder at 2500 across all points, return empty to allow client fallback
     m_series: list[dict] = []
