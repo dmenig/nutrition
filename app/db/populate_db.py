@@ -3,6 +3,7 @@ import os
 import pandas as pd
 import re
 import ast
+from pathlib import Path
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine, text
 from typing import List, Tuple, Optional
@@ -14,12 +15,34 @@ engine = create_engine(settings.DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
+def _resolve_data_file(name: str) -> str:
+    """Return an absolute path to a data file that exists across local/dev/prod.
+
+    Tries common locations in this order:
+    - /app/data (inside container)
+    - <repo_or_app_root>/data relative to this file
+    - CWD/data (fallback)
+    """
+    candidates = [
+        Path("/app/data") / name,
+        Path(__file__).resolve().parents[2] / "data" / name,
+        Path.cwd() / "data" / name,
+    ]
+    for p in candidates:
+        try:
+            if p.exists():
+                return str(p)
+        except Exception:
+            continue
+    return str(Path("data") / name)
+
+
 def populate_food_table():
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
         # Read and insert new entries
-        with open("data/variables.csv", mode="r") as file:
+        with open(_resolve_data_file("variables.csv"), mode="r") as file:
             reader = csv.DictReader(file)
             for row in reader:
                 # Check if food already exists
@@ -144,8 +167,8 @@ def populate_food_log_table():
     db = SessionLocal()
     try:
         # Load the processed journal data
-        journal_df = pd.read_csv("data/processed_journal.csv")
-        variables_df = pd.read_csv("data/variables.csv")
+        journal_df = pd.read_csv(_resolve_data_file("processed_journal.csv"))
+        variables_df = pd.read_csv(_resolve_data_file("variables.csv"))
         # We'll use processed_journal.csv "Pds" column as the canonical observed weight source
 
         # Create a mapping from original to normalized food names
@@ -517,7 +540,7 @@ def populate_sport_activities_table():
             dummy_user = db.query(User).filter(User.id == user_id).first()
 
         # Load journal data
-        journal_df = pd.read_csv("data/processed_journal.csv")
+        journal_df = pd.read_csv(_resolve_data_file("processed_journal.csv"))
 
         # Clear existing sports for dummy user before repopulating
         db.query(SportActivity).filter(SportActivity.user_id == dummy_user.id).delete()
