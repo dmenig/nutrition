@@ -18,3 +18,5 @@ services:
         value: SEQUENTIAL
       - key: MALLOC_ARENA_MAX
         value: 2
+      - key: PREDICT_BACKEND
+        value: numpy

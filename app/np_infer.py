@@ -48,15 +48,15 @@ class NumpyFinalModel:
         b_ih = self.weights.get(f"gru.bias_ih_l{layer_idx}")  # [3H]
         b_hh = self.weights.get(f"gru.bias_hh_l{layer_idx}")  # [3H]
 
-        # Split into gates with PyTorch order: r, z, n
+        # Split into gates in PyTorch's packed order: r, z, n
         W_ir, W_iz, W_in = np.split(W_ih, 3, axis=0)
         W_hr, W_hz, W_hn = np.split(W_hh, 3, axis=0)
-        b_ir = b_ih[0:hidden_dim] if b_ih is not None else 0.0
-        b_iz = b_ih[hidden_dim:2 * hidden_dim] if b_ih is not None else 0.0
-        b_in = b_ih[2 * hidden_dim:3 * hidden_dim] if b_ih is not None else 0.0
-        b_hr = b_hh[0:hidden_dim] if b_hh is not None else 0.0
-        b_hz = b_hh[hidden_dim:2 * hidden_dim] if b_hh is not None else 0.0
-        b_hn = b_hh[2 * hidden_dim:3 * hidden_dim] if b_hh is not None else 0.0
+        b_ir = b_ih[0:hidden_dim] if isinstance(b_ih, np.ndarray) else 0.0
+        b_iz = b_ih[hidden_dim:2 * hidden_dim] if isinstance(b_ih, np.ndarray) else 0.0
+        b_in = b_ih[2 * hidden_dim:3 * hidden_dim] if isinstance(b_ih, np.ndarray) else 0.0
+        b_hr = b_hh[0:hidden_dim] if isinstance(b_hh, np.ndarray) else 0.0
+        b_hz = b_hh[hidden_dim:2 * hidden_dim] if isinstance(b_hh, np.ndarray) else 0.0
+        b_hn = b_hh[2 * hidden_dim:3 * hidden_dim] if isinstance(b_hh, np.ndarray) else 0.0
 
         h_t = np.zeros((hidden_dim,), dtype=np.float32)
         outs = []
@@ -83,7 +83,7 @@ class NumpyFinalModel:
         base_metabolisms = []
         current_metabolism = float(self.initial_metabolism)
 
-        # Head weights
+        # Head weights (PyTorch Linear uses y = x @ W.T + b)
         W0 = self.weights["head.0.weight"]  # [64, hidden+input]
         b0 = self.weights["head.0.bias"]  # [64]
         W2 = self.weights["head.2.weight"]  # [1, 64]
@@ -93,8 +93,8 @@ class NumpyFinalModel:
             current_gru_out = gru_out[t]  # [hidden]
             current_nutrition = nutrition_data[0, t, :]  # [input]
             combined = np.concatenate([current_gru_out, current_nutrition], axis=0)
-            h = _relu(W0 @ combined + b0)
-            inc = np.tanh(W2 @ h + b2)[0] * 0.125
+            h = _relu(combined @ W0.T + b0)
+            inc = np.tanh(h @ W2.T + b2)[0] * 0.125
             current_metabolism = current_metabolism + float(inc)
             base_metabolisms.append([current_metabolism])
 
