@@ -3,10 +3,14 @@ from fastapi.security import APIKeyHeader
 from app.core.config import settings
 from sqlalchemy.orm import Session
 from app.db.database import get_db
-from app.db.models import FoodLog, SportActivity, User
+from app.db.models import FoodLog, SportActivity, User, WeightLog
 from datetime import datetime, timezone
 from app.services.summary import upsert_daily_summary, backfill_all_summaries
 from sqlalchemy import func
+from pydantic import BaseModel
+from typing import List
+import uuid as _uuid
+from sqlalchemy import text as _text
 
 router = APIRouter()
 
@@ -49,6 +53,68 @@ def backfill_daily_summaries(api_key: str = Depends(get_api_key), db: Session = 
 
     updated = backfill_all_summaries(db, user_id)
     return {"updated_days": updated}
+
+
+class WeightImportItem(BaseModel):
+    date: str
+    weight_kg: float
+
+
+@router.post("/weights/import", status_code=status.HTTP_200_OK)
+def import_weights(
+    items: List[WeightImportItem],
+    api_key: str = Depends(get_api_key),
+    db: Session = Depends(get_db),
+):
+    # Ensure a dummy public user exists (for public plots aggregation)
+    dummy_user = db.query(User).filter(User.email == "dummy@example.com").first()
+    if not dummy_user:
+        # Insert via SQL to satisfy schema differences (username column)
+        user_id = str(_uuid.uuid4())
+        db.execute(
+            _text(
+                """
+                INSERT INTO users (id, email, hashed_password, username)
+                VALUES (:id, :email, :hashed_password, :username)
+                """
+            ),
+            {
+                "id": user_id,
+                "email": "dummy@example.com",
+                "hashed_password": "imported",
+                "username": "dummy",
+            },
+        )
+        db.commit()
+        dummy_user = db.query(User).filter(User.id == user_id).first()
+
+    # Upsert weights per day for the dummy user
+    from datetime import datetime as _dt, timezone as _tz
+    inserted = 0
+    for it in items:
+        try:
+            d = _dt.strptime(it.date, "%Y-%m-%d")
+        except ValueError:
+            # Try alternative formats
+            d = _dt.fromisoformat(it.date[0:10])
+        day_dt = _dt(d.year, d.month, d.day, tzinfo=_tz.utc)
+        # Delete existing for that day/user (idempotent)
+        db.query(WeightLog).filter(
+            WeightLog.user_id == dummy_user.id,
+            func.date(WeightLog.logged_at) == day_dt.date(),
+        ).delete()
+        wl = WeightLog(
+            user_id=dummy_user.id,
+            weight_kg=float(it.weight_kg),
+            logged_at=day_dt,
+            logged_date=day_dt.date(),
+        )
+        db.add(wl)
+        inserted += 1
+        if inserted % 200 == 0:
+            db.commit()
+    db.commit()
+    return {"inserted": inserted}
 
 
 @router.post("/populate", status_code=status.HTTP_200_OK)
