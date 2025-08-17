@@ -748,104 +748,23 @@ def plots_debug():
 @app.get("/api/v1/plots/weight", response_model=WeightPlotResponse, tags=["plots"])
 def get_weight_plot_data(days: int | None = None):
     df = get_plot_data(last_n=days)
-    # Prefer DB-constructed series if present
-    # Only include observed weights that are non-null and non-zero (DB path may use 0.0 as placeholder)
+    # Require observed weights from DB-backed data; do not generate fallbacks
+    # Only include observed weights that are non-null and non-zero
     w_obs = [
         {"time_index": row["time_index"], "value": float(row["W_obs"])}
         for _, row in df.iterrows()
         if pd.notnull(row.get("W_obs")) and float(row.get("W_obs", 0) or 0) != 0.0
     ]
+    if not w_obs:
+        # Explicitly error when observed weights are not available from the DB
+        raise HTTPException(status_code=404, detail="Observed weights unavailable in DB; no fallback will be generated")
+
     w_adj = [
         {"time_index": row["time_index"], "value": float(row["W_adj_pred"])}
         for _, row in df.iterrows()
         if pd.notnull(row.get("W_adj_pred"))
     ]
-    if w_adj:
-        return WeightPlotResponse(W_obs=w_obs, W_adj_pred=w_adj)
-
-    # If DB path yielded no weights, compute on the fly via DL model (same as /predict/latest)
-    db = SessionLocal()
-    try:
-        date_expr_fl = func.coalesce(FoodLog.logged_date, func.date(FoodLog.logged_at))
-        food_rows = (
-            db.query(
-                date_expr_fl.label("date"),
-                func.coalesce(func.sum(FoodLog.calories), 0.0).label("calories"),
-                func.coalesce(func.sum(FoodLog.carbs), 0.0).label("carbs"),
-            )
-            .group_by(date_expr_fl)
-            .all()
-        )
-        date_expr_sa = func.coalesce(SportActivity.logged_date, func.date(SportActivity.logged_at))
-        sport_rows = (
-            db.query(
-                date_expr_sa.label("date"),
-                func.coalesce(func.sum(SportActivity.calories_expended), 0.0).label("sport"),
-            )
-            .group_by(date_expr_sa)
-            .all()
-        )
-    finally:
-        db.close()
-    dates = sorted({r.date for r in food_rows} | {r.date for r in sport_rows})
-    if not dates:
-        return WeightPlotResponse(W_obs=[], W_adj_pred=[])
-    # Respect days window if provided
-    if isinstance(days, int) and days > 0 and len(dates) > days:
-        dates = dates[-days:]
-    food_by_date = {r.date: r for r in food_rows}
-    sport_by_date = {r.date: r for r in sport_rows}
-    recs: list[dict] = []
-    for d in dates:
-        fr = food_by_date.get(d)
-        sr = sport_by_date.get(d)
-        recs.append(
-            {
-                "date": d,
-                "calories": float(getattr(fr, "calories", 0.0) or 0.0),
-                "carbs": float(getattr(fr, "carbs", 0.0) or 0.0),
-                "sugar": 0.0,
-                "sel": 0.0,
-                "alcool": 0.0,
-                "water": 0.0,
-                "sport": float(getattr(sr, "sport", 0.0) or 0.0),
-                "pds": 0.0,
-            }
-        )
-    features_df = pd.DataFrame(recs)
-    try:
-        outs = prediction_service.predict_from_features(features_df)
-    except Exception as e:
-        # Surface a clearer upstream error to clients instead of a generic 500
-        msg = str(e)
-        if "NumPy weights not loaded" in msg or "Failed to load NumPy weights" in msg:
-            raise HTTPException(status_code=503, detail="Model unavailable: NumPy weights missing or unreadable")
-        if "connection" in msg.lower() or "db" in msg.lower():
-            raise HTTPException(status_code=502, detail="Upstream data unavailable (DB/connection)")
-        raise HTTPException(status_code=500, detail=f"Prediction failed: {msg}")
-    # Build epoch ms time_index from dates (normalized to UTC at day start)
-    dt = pd.to_datetime(features_df["date"], errors="coerce").dt.tz_localize("UTC", nonexistent="shift_forward", ambiguous="NaT", errors="coerce")
-    dt = dt.dt.normalize()
-    time_index = (dt.view("int64") // 1_000_000).astype("int64").tolist()
-    w_adj_pred = outs.get("predicted_adjusted_weight", [])
-    w_obs_fallback = outs.get("actual_weight", [])
-    # Compose points; include all non-NaN values
-    pred_points = [
-        {"time_index": int(t), "value": float(v)}
-        for t, v in zip(time_index, w_adj_pred)
-        if v is not None and not (isinstance(v, float) and pd.isna(v))
-    ]
-    # Exclude zero placeholders from observed series in fallback path too
-    obs_points = [
-        {"time_index": int(t), "value": float(v)}
-        for t, v in zip(time_index, w_obs_fallback)
-        if (
-            v is not None
-            and not (isinstance(v, float) and pd.isna(v))
-            and float(v) != 0.0
-        )
-    ]
-    return WeightPlotResponse(W_obs=obs_points, W_adj_pred=pred_points)
+    return WeightPlotResponse(W_obs=w_obs, W_adj_pred=w_adj)
 
 
 @app.get(
