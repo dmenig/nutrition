@@ -15,6 +15,7 @@ COPY tests /app/tests
 
 # Copy the application code
 COPY app /app/app
+COPY data /app/data
 COPY train_model.py /app/
 COPY build_features.py /app/
 COPY sport_formulas.py /app/
