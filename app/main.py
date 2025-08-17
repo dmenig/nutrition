@@ -381,7 +381,8 @@ async def get_latest_prediction(source: str | None = None, backend: str | None =
         cand_roots = [
             os.getcwd(),
             "/app",
-            str(pathlib.Path(__file__).resolve().parents[2]),
+            str(pathlib.Path(__file__).resolve().parents[1]),  # likely /.../src
+            str(pathlib.Path(__file__).resolve().parents[2]),  # repo root
         ]
         csv_journal = None
         csv_variables = None
@@ -611,7 +612,8 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
         cand_roots = [
             os.getcwd(),
             "/app",
-            str(pathlib.Path(__file__).resolve().parents[2]),
+            str(pathlib.Path(__file__).resolve().parents[1]),  # likely /.../src
+            str(pathlib.Path(__file__).resolve().parents[2]),  # repo root
         ]
         csv_journal = None
         csv_variables = None
