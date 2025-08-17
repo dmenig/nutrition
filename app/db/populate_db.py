@@ -7,7 +7,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine, text
 from typing import List, Tuple, Optional
 from utils import SafeFormulaEvaluator, SafeSportFormulaEvaluator, normalize_food_names
-from app.db.models import Base, Food, FoodLog, User, SportActivity
+from app.db.models import Base, Food, FoodLog, User, SportActivity, WeightLog
 from app.core.config import settings
 
 engine = create_engine(settings.DATABASE_URL)
@@ -146,6 +146,7 @@ def populate_food_log_table():
         # Load the processed journal data
         journal_df = pd.read_csv("data/processed_journal.csv")
         variables_df = pd.read_csv("data/variables.csv")
+        # We'll use processed_journal.csv "Pds" column as the canonical observed weight source
 
         # Create a mapping from original to normalized food names
         food_name_mapping = {
@@ -204,6 +205,9 @@ def populate_food_log_table():
 
         # Clear existing logs for dummy user before repopulating
         db.query(FoodLog).filter(FoodLog.user_id == default_user_id).delete()
+        db.commit()
+        # Optionally clear weight logs for dummy user
+        db.query(WeightLog).filter(WeightLog.user_id == default_user_id).delete()
         db.commit()
         # Process each row in the journal
         for _, row in journal_df.iterrows():
@@ -277,6 +281,26 @@ def populate_food_log_table():
                 db.add(food_log)
 
         db.commit()
+        # Insert observed weights from processed_journal.csv (Pds column)
+        if "Pds" in journal_df.columns:
+            for _, row in journal_df.iterrows():
+                try:
+                    date_ts = pd.to_datetime(row["Date"])  # pandas Timestamp (date-only)
+                    weight_val = float(row.get("Pds") or 0)
+                    if weight_val == 0:
+                        continue
+                except Exception:
+                    continue
+                from datetime import datetime as _dt, timezone as _tz
+                date_dt = _dt(date_ts.year, date_ts.month, date_ts.day, tzinfo=_tz.utc)
+                wl = WeightLog(
+                    user_id=default_user_id,
+                    weight_kg=weight_val,
+                    logged_at=date_dt,
+                    logged_date=date_dt.date(),
+                )
+                db.add(wl)
+            db.commit()
         print("FoodLog table populated successfully!")
     finally:
         db.close()

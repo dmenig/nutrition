@@ -12,7 +12,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from app.db.database import engine, Base, get_db, SessionLocal
-from app.db.models import DailySummary, FoodLog, SportActivity, User
+from app.db.models import DailySummary, FoodLog, SportActivity, User, WeightLog
 from app.routers import (
     auth,
     custom_foods,
@@ -415,8 +415,17 @@ def get_plot_data(last_n: int | None = None):
             ])
             # Sum across users per date
             df = df.groupby("date", as_index=False).sum(numeric_only=True)
-            # Fill required columns (leave weights empty if unknown)
-            df["W_obs"] = pd.Series(dtype=float)
+            # Join observed weights if any
+            w_rows = (
+                db.query(WeightLog.logged_date.label("date"), func.avg(WeightLog.weight_kg).label("W_obs"))
+                .group_by(WeightLog.logged_date)
+                .all()
+            )
+            if w_rows:
+                w_df = pd.DataFrame([{"date": r.date, "W_obs": float(r.W_obs or 0)} for r in w_rows])
+                df = df.merge(w_df, on="date", how="left")
+            else:
+                df["W_obs"] = pd.Series(dtype=float)
             df["W_adj_pred"] = pd.Series(dtype=float)
             # Keep date for downstream time_index construction; do not slice yet
             return df
@@ -430,7 +439,8 @@ def get_plot_data(last_n: int | None = None):
             # collect all distinct dates from both tables
             food_dates = [d[0] for d in db.query(FoodLog.logged_date).distinct().all()]
             sport_dates = [d[0] for d in db.query(SportActivity.logged_date).distinct().all()]
-            all_dates = sorted({*food_dates, *sport_dates})
+            weight_dates = [d[0] for d in db.query(WeightLog.logged_date).distinct().all()]
+            all_dates = sorted({*food_dates, *sport_dates, *weight_dates})
             if not all_dates:
                 return pd.DataFrame(columns=expected_cols)
             records = []
@@ -453,16 +463,22 @@ def get_plot_data(last_n: int | None = None):
                     .scalar()
                     or 0.0
                 )
+                # Observed weight: average per day across all users for public plots
+                w_obs = (
+                    db.query(func.avg(WeightLog.weight_kg))
+                    .filter(WeightLog.logged_date == d)
+                    .scalar()
+                )
                 records.append(
                     {
                         "date": d,
                         "calories": float(cal or 0.0),
                         "sport": float(sport_total or 0.0),
                         "M_base": 2500.0,
+                        "W_obs": float(w_obs) if w_obs is not None else None,
                     }
                 )
             df = pd.DataFrame(records)
-            df["W_obs"] = pd.Series(dtype=float)
             df["W_adj_pred"] = pd.Series(dtype=float)
             return df
         finally:
@@ -531,6 +547,7 @@ def get_plot_data(last_n: int | None = None):
             df = pd.DataFrame(
                 {
                     "date": features_df["date"],
+                    # Use observed weights from DB if available; fall back to model input only if non-zero
                     "W_obs": outputs.get("actual_weight", []),
                     "W_adj_pred": outputs.get("predicted_adjusted_weight", []),
                     "M_base": outputs.get("base_metabolism_kcal", []),
@@ -538,6 +555,26 @@ def get_plot_data(last_n: int | None = None):
                     "sport": features_df.get("sport", 0),
                 }
             )
+            # Replace W_obs with true observed weights from DB when present (by date)
+            try:
+                db_obs = SessionLocal()
+                try:
+                    w_rows = (
+                        db_obs.query(WeightLog.logged_date.label("date"), func.avg(WeightLog.weight_kg).label("W_obs"))
+                        .group_by(WeightLog.logged_date)
+                        .all()
+                    )
+                    if w_rows:
+                        w_df = pd.DataFrame([{"date": r.date, "W_obs": float(r.W_obs or 0)} for r in w_rows])
+                        df = df.merge(w_df, on="date", how="left", suffixes=("", "_db"))
+                        # Prefer DB observed weights when available; otherwise keep model input values
+                        if "W_obs_db" in df.columns:
+                            df["W_obs"] = df["W_obs_db"].where(pd.notnull(df["W_obs_db"]), df["W_obs"]).astype(float)
+                            df.drop(columns=["W_obs_db"], inplace=True)
+                finally:
+                    db_obs.close()
+            except Exception:
+                pass
         except Exception:
             df = pd.DataFrame()
     # No fallbacks when enforcing DL-only path

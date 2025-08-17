@@ -50,6 +50,19 @@ class SportActivity(Base):
     user = relationship("User")
 
 
+class WeightLog(Base):
+    __tablename__ = "weight_logs"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    weight_kg = Column(Float, nullable=False)
+    logged_at = Column(
+        TIMESTAMP(timezone=True), default=datetime.utcnow, nullable=False
+    )
+    logged_date = Column(Date, nullable=True)
+
+    user = relationship("User")
+
+
 class CustomFood(Base):
     __tablename__ = "custom_foods"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

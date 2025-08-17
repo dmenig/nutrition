@@ -3,7 +3,7 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
-from app.db.models import DailySummary, FoodLog, SportActivity
+from app.db.models import DailySummary, FoodLog, SportActivity, WeightLog
 
 
 def upsert_daily_summary(db: Session, target_date: datetime, user_id: uuid.UUID | None = None) -> None:
@@ -142,6 +142,18 @@ def backfill_all_summaries(db: Session, user_id) -> int:
             by_date[row.date] = rec
         else:
             rec["sport_calories_total"] = float(row.sport_calories_total or 0.0)
+
+    # Optionally, attach average observed weight per day so downstream can use it if needed
+    weight_rows = (
+        db.query(
+            WeightLog.logged_date.label("date"),
+            func.avg(WeightLog.weight_kg).label("avg_weight"),
+        )
+        .group_by(WeightLog.logged_date)
+        .all()
+    )
+    weights_by_date = {r.date: float(r.avg_weight or 0) for r in weight_rows}
+    # Currently, DailySummary has no weight column; weights are used directly by plot builder
 
     rows = list(by_date.values())
     if not rows:
