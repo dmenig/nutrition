@@ -606,9 +606,12 @@ def get_plot_data(last_n: int | None = None):
             # If params are unreadable, keep identity transforms
             pass
 
-    # De-normalize (or pass-through if params missing)
-    df["calories_unnorm"] = df["calories"] * calories_std + calories_mean
-    df["sport_unnorm"] = df["sport"] * sport_std + sport_mean
+    # IMPORTANT: values in df["calories"] and df["sport"] are already absolute (kcal)
+    # because they come directly from the DB aggregations. Do not apply de-normalization
+    # intended for z-scored training tensors. Use pass-through here to avoid inflated values
+    # that would not match the PNG exported from training results.
+    df["calories_unnorm"] = pd.to_numeric(df["calories"], errors="coerce").fillna(0)
+    df["sport_unnorm"] = pd.to_numeric(df["sport"], errors="coerce").fillna(0)
     df["C_exp_t"] = df["M_base"].fillna(0) + df["sport_unnorm"]
 
     # Ensure sorted by time for slicing
@@ -746,10 +749,11 @@ def plots_debug():
 def get_weight_plot_data(days: int | None = None):
     df = get_plot_data(last_n=days)
     # Prefer DB-constructed series if present
+    # Only include observed weights that are non-null and non-zero (DB path may use 0.0 as placeholder)
     w_obs = [
         {"time_index": row["time_index"], "value": float(row["W_obs"])}
         for _, row in df.iterrows()
-        if pd.notnull(row.get("W_obs"))
+        if pd.notnull(row.get("W_obs")) and float(row.get("W_obs", 0) or 0) != 0.0
     ]
     w_adj = [
         {"time_index": row["time_index"], "value": float(row["W_adj_pred"])}
@@ -831,10 +835,15 @@ def get_weight_plot_data(days: int | None = None):
         for t, v in zip(time_index, w_adj_pred)
         if v is not None and not (isinstance(v, float) and pd.isna(v))
     ]
+    # Exclude zero placeholders from observed series in fallback path too
     obs_points = [
         {"time_index": int(t), "value": float(v)}
         for t, v in zip(time_index, w_obs_fallback)
-        if v is not None and not (isinstance(v, float) and pd.isna(v))
+        if (
+            v is not None
+            and not (isinstance(v, float) and pd.isna(v))
+            and float(v) != 0.0
+        )
     ]
     return WeightPlotResponse(W_obs=obs_points, W_adj_pred=pred_points)
 
