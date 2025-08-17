@@ -90,6 +90,25 @@ If `adb` cannot find a device, ensure Developer options and USB debugging are en
   - `curl -X POST https://nutrition-tbdo.onrender.com/api/v1/plots/rebuild`
 
 
+### Plots: data sources and normalization
+
+- **Data sources**
+  - Web/Android plots call the API (`/api/v1/plots/*`), which builds series from DB aggregates and the model.
+  - The PNG (`model_analysis_plots.png`) is generated from `data/final_results.csv` produced during training.
+
+- **Normalization**
+  - DB `calories` and `sport` values are absolute kcal; the server does not de-normalize them.
+  - `M_base` in API responses is already in kcal/day.
+  - The PNG de-normalizes using `models/best_params.json` (for training-time tensors); this differs from the API path, which operates on DB absolutes.
+
+- **Time axis**
+  - API `time_index` values are epoch milliseconds (for time charts).
+  - The PNG uses a simple day index; values align but x-axes differ.
+
+- **Troubleshooting**
+  - If values appear inconsistent, the usual cause is different underlying datasets (DB vs. training CSV). Ensure you’re comparing the same date ranges and data sources.
+
+
 ## Backend model inference (low-memory on Render)
 
 The API serves plots by predicting daily metabolism/weight adjustment using a small GRU model. Production runs in a 512 MB container, so the model is served with a torch-free path by default.
