@@ -377,25 +377,49 @@ async def get_latest_prediction(source: str | None = None, backend: str | None =
             from build_features import main as build_features_main
         except Exception as e:
             raise HTTPException(status_code=503, detail=f"CSV features unavailable: {e}")
-        # Resolve CSVs from common locations
+        # Resolve CSVs from common locations or URLs
         cand_roots = [
             os.getcwd(),
             "/app",
             str(pathlib.Path(__file__).resolve().parents[1]),  # likely /.../src
             str(pathlib.Path(__file__).resolve().parents[2]),  # repo root
         ]
-        csv_journal = None
-        csv_variables = None
+        csv_journal: str | None = None
+        csv_variables: str | None = None
+        # 1) Environment-provided URLs take precedence
+        env_j = os.environ.get("CSV_URL_JOURNAL")
+        env_v = os.environ.get("CSV_URL_VARIABLES")
+        if env_j and env_v:
+            csv_journal, csv_variables = env_j, env_v
+        # 2) Local files in known roots
         for root in cand_roots:
             j = os.path.join(root, "data", "processed_journal.csv")
             v = os.path.join(root, "data", "variables.csv")
+            if csv_journal and csv_variables:
+                break
             if os.path.exists(j) and os.path.exists(v):
                 csv_journal, csv_variables = j, v
                 break
         if not (csv_journal and csv_variables):
-            raise HTTPException(status_code=503, detail="CSV features missing (checked cwd, /app, repo root)")
+            raise HTTPException(status_code=503, detail="CSV features missing (checked env URLs, cwd, /app, repo roots)")
         try:
-            raw_df = build_features_main(journal_path=csv_journal, variables_path=csv_variables)
+            # If URLs provided, download to temp files to satisfy data_processor's os.path.exists checks
+            if csv_journal.startswith("http") or csv_variables.startswith("http"):
+                import tempfile, requests
+                with tempfile.TemporaryDirectory() as td:
+                    jp = os.path.join(td, "processed_journal.csv")
+                    vp = os.path.join(td, "variables.csv")
+                    rj = requests.get(csv_journal, timeout=30)
+                    rj.raise_for_status()
+                    with open(jp, "wb") as f:
+                        f.write(rj.content)
+                    rv = requests.get(csv_variables, timeout=30)
+                    rv.raise_for_status()
+                    with open(vp, "wb") as f:
+                        f.write(rv.content)
+                    raw_df = build_features_main(journal_path=jp, variables_path=vp)
+            else:
+                raw_df = build_features_main(journal_path=csv_journal, variables_path=csv_variables)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to build CSV features: {e}")
         df_feat = raw_df.copy()
@@ -608,25 +632,47 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
             from build_features import main as build_features_main  # lazy import
         except Exception:
             return pd.DataFrame(columns=["date"] + expected_cols)
-        # Resolve CSV presence from multiple roots
+        # Resolve CSV presence from multiple roots or URLs
         cand_roots = [
             os.getcwd(),
             "/app",
             str(pathlib.Path(__file__).resolve().parents[1]),  # likely /.../src
             str(pathlib.Path(__file__).resolve().parents[2]),  # repo root
         ]
-        csv_journal = None
-        csv_variables = None
+        csv_journal: str | None = None
+        csv_variables: str | None = None
+        # 1) Environment-provided URLs take precedence
+        env_j = os.environ.get("CSV_URL_JOURNAL")
+        env_v = os.environ.get("CSV_URL_VARIABLES")
+        if env_j and env_v:
+            csv_journal, csv_variables = env_j, env_v
         for root in cand_roots:
             j = os.path.join(root, "data", "processed_journal.csv")
             v = os.path.join(root, "data", "variables.csv")
+            if csv_journal and csv_variables:
+                break
             if os.path.exists(j) and os.path.exists(v):
                 csv_journal, csv_variables = j, v
                 break
         if not (csv_journal and csv_variables):
             return pd.DataFrame(columns=["date"] + expected_cols)
         try:
-            features_df = build_features_main(journal_path=csv_journal, variables_path=csv_variables)
+            if csv_journal.startswith("http") or csv_variables.startswith("http"):
+                import tempfile, requests
+                with tempfile.TemporaryDirectory() as td:
+                    jp = os.path.join(td, "processed_journal.csv")
+                    vp = os.path.join(td, "variables.csv")
+                    rj = requests.get(csv_journal, timeout=30)
+                    rj.raise_for_status()
+                    with open(jp, "wb") as f:
+                        f.write(rj.content)
+                    rv = requests.get(csv_variables, timeout=30)
+                    rv.raise_for_status()
+                    with open(vp, "wb") as f:
+                        f.write(rv.content)
+                    features_df = build_features_main(journal_path=jp, variables_path=vp)
+            else:
+                features_df = build_features_main(journal_path=csv_journal, variables_path=csv_variables)
             # Ensure required columns exist and numeric
             nutrition_cols = ["calories", "carbs", "sugar", "sel", "alcool", "water"]
             for col in nutrition_cols + ["pds", "sport"]:
