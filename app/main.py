@@ -688,6 +688,9 @@ def plots_debug():
         "db_sport_days": 0,
         "db_weight_days": 0,
         "db_weight_rows": 0,
+        "csv_app_data_exists": False,
+        "csv_repo_data_exists": False,
+        "csv_paths": {},
         "final_rows": 0,
         "final_cols": [],
     }
@@ -712,6 +715,27 @@ def plots_debug():
         debug["final_cols"] = list(df_final.columns)
     except Exception as e:
         debug["final_error"] = str(e)
+    # File existence diagnostics for CSVs
+    try:
+        app_vars = pathlib.Path("/app/data/variables.csv")
+        app_journal = pathlib.Path("/app/data/processed_journal.csv")
+        repo_vars = pathlib.Path(__file__).resolve().parents[2] / "data" / "variables.csv"
+        repo_journal = pathlib.Path(__file__).resolve().parents[2] / "data" / "processed_journal.csv"
+        cwd_vars = pathlib.Path.cwd() / "data" / "variables.csv"
+        cwd_journal = pathlib.Path.cwd() / "data" / "processed_journal.csv"
+        debug["csv_paths"] = {
+            "app_vars": str(app_vars),
+            "app_journal": str(app_journal),
+            "repo_vars": str(repo_vars),
+            "repo_journal": str(repo_journal),
+            "cwd_vars": str(cwd_vars),
+            "cwd_journal": str(cwd_journal),
+        }
+        debug["csv_app_data_exists"] = app_vars.exists() and app_journal.exists()
+        debug["csv_repo_data_exists"] = repo_vars.exists() and repo_journal.exists()
+        debug["csv_cwd_data_exists"] = cwd_vars.exists() and cwd_journal.exists()
+    except Exception as e:
+        debug["csv_diag_error"] = str(e)
     # Extra diagnostics for model/params presence and DL path
     try:
         debug["has_npz"] = os.path.exists(prediction_service.npz_path)
