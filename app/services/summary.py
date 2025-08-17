@@ -144,12 +144,13 @@ def backfill_all_summaries(db: Session, user_id) -> int:
             rec["sport_calories_total"] = float(row.sport_calories_total or 0.0)
 
     # Optionally, attach average observed weight per day so downstream can use it if needed
+    date_expr_w = func.coalesce(WeightLog.logged_date, func.date(WeightLog.logged_at))
     weight_rows = (
         db.query(
-            WeightLog.logged_date.label("date"),
+            date_expr_w.label("date"),
             func.avg(WeightLog.weight_kg).label("avg_weight"),
         )
-        .group_by(WeightLog.logged_date)
+        .group_by(date_expr_w)
         .all()
     )
     weights_by_date = {r.date: float(r.avg_weight or 0) for r in weight_rows}

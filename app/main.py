@@ -416,9 +416,10 @@ def get_plot_data(last_n: int | None = None):
             # Sum across users per date
             df = df.groupby("date", as_index=False).sum(numeric_only=True)
             # Join observed weights if any
+            date_expr_w = func.coalesce(WeightLog.logged_date, func.date(WeightLog.logged_at))
             w_rows = (
-                db.query(WeightLog.logged_date.label("date"), func.avg(WeightLog.weight_kg).label("W_obs"))
-                .group_by(WeightLog.logged_date)
+                db.query(date_expr_w.label("date"), func.avg(WeightLog.weight_kg).label("W_obs"))
+                .group_by(date_expr_w)
                 .all()
             )
             if w_rows:
@@ -439,7 +440,8 @@ def get_plot_data(last_n: int | None = None):
             # collect all distinct dates from both tables
             food_dates = [d[0] for d in db.query(FoodLog.logged_date).distinct().all()]
             sport_dates = [d[0] for d in db.query(SportActivity.logged_date).distinct().all()]
-            weight_dates = [d[0] for d in db.query(WeightLog.logged_date).distinct().all()]
+            date_expr_w = func.coalesce(WeightLog.logged_date, func.date(WeightLog.logged_at))
+            weight_dates = [d[0] for d in db.query(date_expr_w).distinct().all()]
             all_dates = sorted({*food_dates, *sport_dates, *weight_dates})
             if not all_dates:
                 return pd.DataFrame(columns=expected_cols)
@@ -464,9 +466,10 @@ def get_plot_data(last_n: int | None = None):
                     or 0.0
                 )
                 # Observed weight: average per day across all users for public plots
+                date_expr_w = func.coalesce(WeightLog.logged_date, func.date(WeightLog.logged_at))
                 w_obs = (
                     db.query(func.avg(WeightLog.weight_kg))
-                    .filter(WeightLog.logged_date == d)
+                    .filter(date_expr_w == d)
                     .scalar()
                 )
                 records.append(
@@ -559,9 +562,10 @@ def get_plot_data(last_n: int | None = None):
             try:
                 db_obs = SessionLocal()
                 try:
+                    date_expr_w = func.coalesce(WeightLog.logged_date, func.date(WeightLog.logged_at))
                     w_rows = (
-                        db_obs.query(WeightLog.logged_date.label("date"), func.avg(WeightLog.weight_kg).label("W_obs"))
-                        .group_by(WeightLog.logged_date)
+                        db_obs.query(date_expr_w.label("date"), func.avg(WeightLog.weight_kg).label("W_obs"))
+                        .group_by(date_expr_w)
                         .all()
                     )
                     if w_rows:
@@ -785,22 +789,20 @@ def plots_debug():
 @app.get("/api/v1/plots/weight", response_model=WeightPlotResponse, tags=["plots"])
 def get_weight_plot_data(days: int | None = None):
     df = get_plot_data(last_n=days)
-    # Require observed weights from DB-backed data; do not generate fallbacks
+    # Enforce presence of observed weights; no fallback
     # Only include observed weights that are non-null and non-zero
     w_obs = [
         {"time_index": row["time_index"], "value": float(row["W_obs"])}
         for _, row in df.iterrows()
         if pd.notnull(row.get("W_obs")) and float(row.get("W_obs", 0) or 0) != 0.0
     ]
-    if not w_obs:
-        # Explicitly error when observed weights are not available from the DB
-        raise HTTPException(status_code=404, detail="Observed weights unavailable in DB; no fallback will be generated")
-
     w_adj = [
         {"time_index": row["time_index"], "value": float(row["W_adj_pred"])}
         for _, row in df.iterrows()
         if pd.notnull(row.get("W_adj_pred"))
     ]
+    if not w_obs:
+        raise HTTPException(status_code=404, detail="Observed weights unavailable in DB")
     return WeightPlotResponse(W_obs=w_obs, W_adj_pred=w_adj)
 
 
