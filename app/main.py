@@ -376,10 +376,22 @@ async def get_latest_prediction(source: str | None = None):
             from build_features import main as build_features_main
         except Exception as e:
             raise HTTPException(status_code=503, detail=f"CSV features unavailable: {e}")
-        csv_journal = os.path.join(os.getcwd(), "data", "processed_journal.csv")
-        csv_variables = os.path.join(os.getcwd(), "data", "variables.csv")
-        if not (os.path.exists(csv_journal) and os.path.exists(csv_variables)):
-            raise HTTPException(status_code=503, detail="CSV features missing in data/ directory")
+        # Resolve CSVs from common locations
+        cand_roots = [
+            os.getcwd(),
+            "/app",
+            str(pathlib.Path(__file__).resolve().parents[2]),
+        ]
+        csv_journal = None
+        csv_variables = None
+        for root in cand_roots:
+            j = os.path.join(root, "data", "processed_journal.csv")
+            v = os.path.join(root, "data", "variables.csv")
+            if os.path.exists(j) and os.path.exists(v):
+                csv_journal, csv_variables = j, v
+                break
+        if not (csv_journal and csv_variables):
+            raise HTTPException(status_code=503, detail="CSV features missing (checked cwd, /app, repo root)")
         try:
             raw_df = build_features_main(journal_path=csv_journal, variables_path=csv_variables)
         except Exception as e:
@@ -594,10 +606,21 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
             from build_features import main as build_features_main  # lazy import
         except Exception:
             return pd.DataFrame(columns=["date"] + expected_cols)
-        # Verify CSV presence
-        csv_journal = os.path.join(os.getcwd(), "data", "processed_journal.csv")
-        csv_variables = os.path.join(os.getcwd(), "data", "variables.csv")
-        if not (os.path.exists(csv_journal) and os.path.exists(csv_variables)):
+        # Resolve CSV presence from multiple roots
+        cand_roots = [
+            os.getcwd(),
+            "/app",
+            str(pathlib.Path(__file__).resolve().parents[2]),
+        ]
+        csv_journal = None
+        csv_variables = None
+        for root in cand_roots:
+            j = os.path.join(root, "data", "processed_journal.csv")
+            v = os.path.join(root, "data", "variables.csv")
+            if os.path.exists(j) and os.path.exists(v):
+                csv_journal, csv_variables = j, v
+                break
+        if not (csv_journal and csv_variables):
             return pd.DataFrame(columns=["date"] + expected_cols)
         try:
             features_df = build_features_main(journal_path=csv_journal, variables_path=csv_variables)
