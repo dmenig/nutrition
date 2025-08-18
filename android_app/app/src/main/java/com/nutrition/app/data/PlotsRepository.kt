@@ -39,7 +39,8 @@ class PlotsRepository @Inject constructor(
             DateRange.YEAR -> 365
         }
         val resp = plotsApiService.getWeightPlot(days = days)
-        val series = if (resp.W_obs.isNotEmpty()) resp.W_obs else resp.W_adj_pred
+        // Prefer model predictions for parity with local code; fall back to observed if predictions missing
+        val series = if (resp.W_adj_pred.isNotEmpty()) resp.W_adj_pred else resp.W_obs
         val entries = series.map { Entry(toDaysSinceEpochFromAny(it.time_index), it.value) }
         if (entries.isNotEmpty()) {
             val preview = entries.take(3).joinToString { "(${it.x}, ${it.y})" }

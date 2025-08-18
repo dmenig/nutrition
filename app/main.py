@@ -820,9 +820,10 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
     plots_source = (source or os.environ.get("PLOTS_SOURCE", "auto")).lower()
     df = pd.DataFrame()
     if plots_source == "csv":
+        # Explicit CSV parity
         df = _build_from_training_csv()
-    else:
-        # DB-first
+    elif plots_source == "db":
+        # Explicit DB-only
         features_df = _build_features_from_db()
         if features_df is not None and not features_df.empty:
             try:
@@ -830,7 +831,6 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
                 df = pd.DataFrame(
                     {
                         "date": features_df["date"],
-                        # Use observed weights from DB if available; fall back to model input only if non-zero
                         "W_obs": outputs.get("actual_weight", []),
                         "W_adj_pred": outputs.get("predicted_adjusted_weight", []),
                         "M_base": outputs.get("base_metabolism_kcal", []),
@@ -851,7 +851,6 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
                         if w_rows:
                             w_df = pd.DataFrame([{"date": r.date, "W_obs": float(r.W_obs or 0)} for r in w_rows])
                             df = df.merge(w_df, on="date", how="left", suffixes=("", "_db"))
-                            # Prefer DB observed weights when available; otherwise keep model input values
                             if "W_obs_db" in df.columns:
                                 df["W_obs"] = df["W_obs_db"].where(pd.notnull(df["W_obs_db"]), df["W_obs"]).astype(float)
                                 df.drop(columns=["W_obs_db"], inplace=True)
@@ -861,9 +860,45 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
                     pass
             except Exception:
                 df = pd.DataFrame()
-        # If DB path yielded nothing or auto mode wants parity, try CSV next
-        if df.empty and plots_source in ("auto", "db_then_csv", "auto_csv"):
-            df = _build_from_training_csv()
+    else:
+        # Auto mode: prefer CSV parity when available, fall back to DB aggregates
+        df = _build_from_training_csv()
+        if df.empty:
+            features_df = _build_features_from_db()
+            if features_df is not None and not features_df.empty:
+                try:
+                    outputs = prediction_service.predict_from_features(features_df)
+                    df = pd.DataFrame(
+                        {
+                            "date": features_df["date"],
+                            "W_obs": outputs.get("actual_weight", []),
+                            "W_adj_pred": outputs.get("predicted_adjusted_weight", []),
+                            "M_base": outputs.get("base_metabolism_kcal", []),
+                            "calories": features_df.get("calories", 0),
+                            "sport": features_df.get("sport", 0),
+                        }
+                    )
+                    try:
+                        db_obs = SessionLocal()
+                        try:
+                            date_expr_w = func.coalesce(WeightLog.logged_date, func.date(WeightLog.logged_at))
+                            w_rows = (
+                                db_obs.query(date_expr_w.label("date"), func.avg(WeightLog.weight_kg).label("W_obs"))
+                                .group_by(date_expr_w)
+                                .all()
+                            )
+                            if w_rows:
+                                w_df = pd.DataFrame([{"date": r.date, "W_obs": float(r.W_obs or 0)} for r in w_rows])
+                                df = df.merge(w_df, on="date", how="left", suffixes=("", "_db"))
+                                if "W_obs_db" in df.columns:
+                                    df["W_obs"] = df["W_obs_db"].where(pd.notnull(df["W_obs_db"]), df["W_obs"]).astype(float)
+                                    df.drop(columns=["W_obs_db"], inplace=True)
+                        finally:
+                            db_obs.close()
+                    except Exception:
+                        pass
+                except Exception:
+                    df = pd.DataFrame()
     # As final safety nets
     if df.empty:
         df = _build_from_daily_summaries()
