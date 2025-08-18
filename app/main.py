@@ -351,17 +351,41 @@ _PREDICT_CACHE: dict[str, dict] = {}
 
 @app.on_event("startup")
 async def startup_event():
-    # Warm the plot cache in the background so first user hits are fast
-    def _warm_cache() -> None:
-        try:
-            # Compute once; get_plot_data will populate the cache
-            _ = get_plot_data(last_n=None)
-        except Exception:
-            # Best effort; failures are non-fatal
-            pass
+    """Precompute predictions and plots at startup so first requests are fast.
+
+    We build plot data from the DB path to avoid CSV downloads and populate the
+    in-memory cache synchronously. Failures are non-fatal; the server will still
+    start and compute lazily on first request.
+    """
+    try:
+        # Build and cache plot data using DB aggregates (also warms model weights)
+        _ = get_plot_data(last_n=None, source="db")
+    except Exception:
+        # Best effort only
+        pass
+
+    # Schedule daily rebuild at midnight UTC
+    def _midnight_rebuild_loop() -> None:
+        import time as _time
+        while True:
+            try:
+                now = datetime.now(timezone.utc)
+                next_midnight = (now + timedelta(days=1)).replace(
+                    hour=0, minute=0, second=0, microsecond=0
+                )
+                sleep_seconds = max(1.0, (next_midnight - now).total_seconds())
+                _time.sleep(sleep_seconds)
+                try:
+                    _ = get_plot_data(last_n=None, source="db")
+                except Exception:
+                    # Ignore and try again the next day
+                    pass
+            except Exception:
+                # Backoff a bit on unexpected errors
+                _time.sleep(60.0)
 
     try:
-        t = Thread(target=_warm_cache, daemon=True)
+        t = Thread(target=_midnight_rebuild_loop, daemon=True)
         t.start()
     except Exception:
         pass
@@ -478,6 +502,24 @@ async def get_latest_prediction(source: str | None = None, backend: str | None =
         except Exception:
             pass
     else:
+        # Try serving DB-based predictions from cache if present
+        try:
+            with _PREDICT_CACHE_LOCK:
+                cached = _PREDICT_CACHE.get(src_key)
+            if cached is not None and isinstance(cached.get("outputs"), dict):
+                outputs = cached["outputs"]
+                latest_idx = int(cached.get("latest_idx", len(outputs.get("base_metabolism_kcal", [])) - 1))
+                return {
+                    "latest": {
+                        "actual_weight": outputs["actual_weight"][latest_idx],
+                        "predicted_adjusted_weight": outputs["predicted_adjusted_weight"][latest_idx],
+                        "water_retention": outputs["water_retention"][latest_idx],
+                        "base_metabolism_kcal": outputs["base_metabolism_kcal"][latest_idx],
+                    },
+                    "series": outputs,
+                }
+        except Exception:
+            pass
         db = SessionLocal()
         try:
             # Aggregate minimal features per day from DB
@@ -502,7 +544,9 @@ async def get_latest_prediction(source: str | None = None, backend: str | None =
             )
         finally:
             db.close()
-        dates = sorted({r.date for r in food_rows} | {r.date for r in sport_rows})
+        # Exclude today's logs; predictions should rely only on complete past days
+        today_utc = datetime.utcnow().date()
+        dates = sorted(d for d in ({r.date for r in food_rows} | {r.date for r in sport_rows}) if d < today_utc)
         if not dates:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="No DB data available for prediction.")
         food_by_date = {r.date: r for r in food_rows}
@@ -527,15 +571,14 @@ async def get_latest_prediction(source: str | None = None, backend: str | None =
             )
         features_df = pd.DataFrame(records)
     outputs = prediction_service.predict_from_features(features_df, backend=backend)
-    # Populate cache for CSV source
+    # Populate cache for future requests
     try:
-        if src_key == "csv":
-            with _PREDICT_CACHE_LOCK:
-                _PREDICT_CACHE[src_key] = {
-                    "outputs": outputs,
-                    "latest_idx": len(features_df) - 1,
-                    "ts": pd.Timestamp.utcnow().isoformat(),
-                }
+        with _PREDICT_CACHE_LOCK:
+            _PREDICT_CACHE[src_key] = {
+                "outputs": outputs,
+                "latest_idx": len(features_df) - 1,
+                "ts": pd.Timestamp.utcnow().isoformat(),
+            }
     except Exception:
         pass
     latest_idx = len(features_df) - 1
@@ -786,7 +829,9 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
                 .group_by(date_expr_sa)
                 .all()
             )
-            dates = sorted({r.date for r in food_rows} | {r.date for r in sport_rows})
+            # Exclude today's date; predictions are based on complete past days only
+            today_utc = datetime.utcnow().date()
+            dates = sorted(d for d in ({r.date for r in food_rows} | {r.date for r in sport_rows}) if d < today_utc)
             if not dates:
                 return pd.DataFrame(columns=["date", "calories", "carbs", "sugar", "sel", "alcool", "water", "sport", "pds"])  # empty
             food_by_date = {r.date: r for r in food_rows}
@@ -828,6 +873,16 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
         if features_df is not None and not features_df.empty:
             try:
                 outputs = prediction_service.predict_from_features(features_df)
+                # Seed prediction cache for DB source so /predict/latest is instant
+                try:
+                    with _PREDICT_CACHE_LOCK:
+                        _PREDICT_CACHE["db"] = {
+                            "outputs": outputs,
+                            "latest_idx": len(features_df) - 1,
+                            "ts": pd.Timestamp.utcnow().isoformat(),
+                        }
+                except Exception:
+                    pass
                 df = pd.DataFrame(
                     {
                         "date": features_df["date"],
@@ -868,6 +923,16 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
             if features_df is not None and not features_df.empty:
                 try:
                     outputs = prediction_service.predict_from_features(features_df)
+                    # Seed prediction cache for DB source in auto mode as well
+                    try:
+                        with _PREDICT_CACHE_LOCK:
+                            _PREDICT_CACHE["db"] = {
+                                "outputs": outputs,
+                                "latest_idx": len(features_df) - 1,
+                                "ts": pd.Timestamp.utcnow().isoformat(),
+                            }
+                    except Exception:
+                        pass
                     df = pd.DataFrame(
                         {
                             "date": features_df["date"],
