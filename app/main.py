@@ -364,7 +364,7 @@ async def startup_event():
         # Best effort only
         pass
 
-    # Schedule daily rebuild at midnight UTC
+    # Schedule daily rebuild at midnight UTC and start backup scheduler
     def _midnight_rebuild_loop() -> None:
         import time as _time
         while True:
@@ -387,6 +387,12 @@ async def startup_event():
     try:
         t = Thread(target=_midnight_rebuild_loop, daemon=True)
         t.start()
+    except Exception:
+        pass
+    # Start backup scheduler in background (best-effort)
+    try:
+        from app.routers.admin import start_backup_scheduler_internal
+        _ = start_backup_scheduler_internal()
     except Exception:
         pass
     return None

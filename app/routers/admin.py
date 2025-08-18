@@ -11,6 +11,8 @@ from pydantic import BaseModel
 from typing import List
 import uuid as _uuid
 from sqlalchemy import text as _text
+import threading
+import time
 
 router = APIRouter()
 
@@ -143,6 +145,72 @@ def populate_all(api_key: str = Depends(get_api_key)):
         return {"foods": int(foods), "food_logs": int(logs), "sport_activities": int(sports)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Populate failed: {e}")
+
+
+# --- Database backup endpoints and scheduler ---
+
+from typing import Optional
+
+_BACKUP_THREAD: Optional[threading.Thread] = None
+_BACKUP_SCHEDULER_RUNNING: bool = False
+
+
+def _backup_loop_daily() -> None:
+    global _BACKUP_SCHEDULER_RUNNING
+    _BACKUP_SCHEDULER_RUNNING = True
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    from app.services.backup import perform_backup
+    while True:
+        try:
+            now = _dt.now(_tz.utc)
+            next_midnight = (now + _td(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            sleep_s = max(1.0, (next_midnight - now).total_seconds())
+            time.sleep(sleep_s)
+            try:
+                _ = perform_backup()
+            except Exception:
+                pass
+        except Exception:
+            time.sleep(60.0)
+
+
+def start_backup_scheduler_internal() -> dict:
+    global _BACKUP_THREAD, _BACKUP_SCHEDULER_RUNNING
+    if _BACKUP_THREAD and _BACKUP_THREAD.is_alive():
+        return {"running": True}
+    try:
+        t = threading.Thread(target=_backup_loop_daily, daemon=True)
+        t.start()
+        _BACKUP_THREAD = t
+        return {"running": True}
+    except Exception as e:
+        raise RuntimeError(f"Failed to start scheduler: {e}")
+
+
+@router.post("/backup/run", status_code=status.HTTP_200_OK)
+def run_backup_now(api_key: str = Depends(get_api_key)):
+    from app.services.backup import perform_backup
+    try:
+        result = perform_backup()
+        return {"ok": True, **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Backup failed: {e}")
+
+
+@router.post("/backup/scheduler/start", status_code=status.HTTP_200_OK)
+def start_backup_scheduler(api_key: str = Depends(get_api_key)):
+    try:
+        return start_backup_scheduler_internal()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/backup/scheduler/status", status_code=status.HTTP_200_OK)
+def backup_scheduler_status(api_key: str = Depends(get_api_key)):
+    global _BACKUP_THREAD
+    return {
+        "running": bool(_BACKUP_THREAD and _BACKUP_THREAD.is_alive()),
+    }
 
 
 def _populate_job_impl() -> None:
