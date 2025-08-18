@@ -265,6 +265,25 @@ class PredictionService:
                 0
             )
 
+        # When sourcing features from the DB, some nutrition columns are unavailable and
+        # filled with zeros (placeholders for "unknown"). If we normalize these zeros,
+        # they become large negative z-scores (-(mean/std)) for the entire sequence,
+        # which can drive the GRU to unrealistic regimes and explode weights.
+        # To preserve training-time distribution, replace all-zero placeholder columns
+        # with their normalization means so their normalized values are exactly 0.
+        for missing_col in ["sugar", "sel", "alcool", "water"]:
+            if missing_col in features_df.columns:
+                col_series = features_df[missing_col]
+                try:
+                    is_all_zero = bool((col_series == 0).all())
+                except Exception:
+                    is_all_zero = False
+                if is_all_zero:
+                    mean_val = float(
+                        self.normalization_stats.get(missing_col, {}).get("mean", 0.0)
+                    )
+                    features_df.loc[:, missing_col] = mean_val
+
         # Normalize using stored stats
         norm_df = features_df.copy()
         for col in nutrition_cols + ["sport"]:
