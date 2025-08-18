@@ -13,7 +13,7 @@ from app.schemas import (
 )  # Import DailyFoodLogSummary
 from app.core.auth import get_current_user
 from app.db.database import get_db
-from app.services.summary import upsert_daily_summary
+from app.services.summary import upsert_daily_summary, rebuild_predictions_cache_async
 
 router = APIRouter()
 
@@ -61,6 +61,13 @@ def create_food_log(
     db.refresh(db_food_log)
     # Update daily summary for the specific day
     upsert_daily_summary(db, db_food_log.logged_at, current_user.id)
+    # If the entry is not for today (UTC), rebuild predictions cache so plots reflect changes
+    try:
+        today_utc = datetime.utcnow().date()
+        if db_food_log.logged_at.date() < today_utc:
+            rebuild_predictions_cache_async()
+    except Exception:
+        pass
     return db_food_log
 
 
@@ -159,6 +166,13 @@ def update_food_log(
     db.commit()
     db.refresh(db_food_log)
     upsert_daily_summary(db, db_food_log.logged_at, current_user.id)
+    # Rebuild predictions if a past day was modified
+    try:
+        today_utc = datetime.utcnow().date()
+        if db_food_log.logged_at.date() < today_utc:
+            rebuild_predictions_cache_async()
+    except Exception:
+        pass
     return db_food_log
 
 
@@ -180,4 +194,11 @@ def delete_food_log(
     db.delete(db_food_log)
     db.commit()
     upsert_daily_summary(db, day, current_user.id)
+    # Rebuild predictions if a past day was modified
+    try:
+        today_utc = datetime.utcnow().date()
+        if day.date() < today_utc:
+            rebuild_predictions_cache_async()
+    except Exception:
+        pass
     return {"message": "Food log deleted successfully"}

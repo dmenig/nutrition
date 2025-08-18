@@ -1,5 +1,6 @@
 # Set low-memory/thread env before importing libraries that may initialize BLAS backends
 import os as _early_os
+
 _early_os.environ.setdefault("OMP_NUM_THREADS", "1")
 _early_os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 _early_os.environ.setdefault("MKL_NUM_THREADS", "1")
@@ -34,6 +35,7 @@ from typing import Any
 from threading import Lock, Thread
 from fastapi import BackgroundTasks
 import gc
+
 # Defer heavy imports from `train_model` until needed to keep memory/CPU footprint low
 import json  # Added import for json
 import pathlib
@@ -78,7 +80,11 @@ class PredictionService:
         # Load normalization stats (used by both backends)
         try:
             params_path = self._resolve_first_existing(
-                [self.params_path, "/app/best_params.json", "/app/models/best_params.json"]
+                [
+                    self.params_path,
+                    "/app/best_params.json",
+                    "/app/models/best_params.json",
+                ]
             )
             with open(params_path, "r") as f:
                 params = json.load(f)
@@ -111,7 +117,12 @@ class PredictionService:
         hidden_size = int(sd["gru.weight_hh_l0"].shape[1])
         num_layers = sum(1 for k in sd.keys() if k.startswith("gru.weight_ih_l")) or 1
         input_size = 6  # calories, carbs, sugar, sel, alcool, water
-        model = FinalModel(input_size, initial_weight_guess=70.0, hidden_size=hidden_size, num_layers=num_layers)
+        model = FinalModel(
+            input_size,
+            initial_weight_guess=70.0,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+        )
         model.load_state_dict(sd)
         model.eval()
         self.model = model
@@ -194,6 +205,7 @@ class PredictionService:
         # NumPy-only inference
         if self.np_model is None:
             from app.np_infer import load_numpy_weights, NumpyFinalModel  # noqa: WPS433
+
             weights = load_numpy_weights(self.npz_path)
             # Infer architecture sizes from saved shapes
             head_w = weights.get("head.0.weight")
@@ -202,8 +214,12 @@ class PredictionService:
                 raise RuntimeError("NP weights missing required tensors")
             hidden_size = gru_w.shape[1]
             input_size = head_w.shape[1] - hidden_size
-            num_layers = sum(1 for k in weights.keys() if k.startswith("gru.weight_ih_l"))
-            self.np_model = NumpyFinalModel(weights, input_size, hidden_size, num_layers)
+            num_layers = sum(
+                1 for k in weights.keys() if k.startswith("gru.weight_ih_l")
+            )
+            self.np_model = NumpyFinalModel(
+                weights, input_size, hidden_size, num_layers
+            )
         # Assuming the input data needs to be converted to a tensor and normalized
         # This part needs to be aligned with how the model expects its input during prediction
         # For now, a placeholder for prediction.
@@ -234,7 +250,9 @@ class PredictionService:
         base_metabolisms = self.np_model.forward(features)
         return base_metabolisms.squeeze().tolist()
 
-    def predict_from_features(self, features_df: pd.DataFrame, backend: str | None = None):
+    def predict_from_features(
+        self, features_df: pd.DataFrame, backend: str | None = None
+    ):
         # Ensure normalization params are loaded
         self._ensure_normalization_stats_loaded()
         # Ensure required columns and numeric types
@@ -243,7 +261,28 @@ class PredictionService:
         for col in required_cols:
             if col not in features_df.columns:
                 features_df[col] = 0.0
-            features_df[col] = pd.to_numeric(features_df[col], errors="coerce").fillna(0)
+            features_df[col] = pd.to_numeric(features_df[col], errors="coerce").fillna(
+                0
+            )
+
+        # When sourcing features from the DB, some nutrition columns are unavailable and
+        # filled with zeros (placeholders for "unknown"). If we normalize these zeros,
+        # they become large negative z-scores (-(mean/std)) for the entire sequence,
+        # which can drive the GRU to unrealistic regimes and explode weights.
+        # To preserve training-time distribution, replace all-zero placeholder columns
+        # with their normalization means so their normalized values are exactly 0.
+        for missing_col in ["sugar", "sel", "alcool", "water"]:
+            if missing_col in features_df.columns:
+                col_series = features_df[missing_col]
+                try:
+                    is_all_zero = bool((col_series == 0).all())
+                except Exception:
+                    is_all_zero = False
+                if is_all_zero:
+                    mean_val = float(
+                        self.normalization_stats.get(missing_col, {}).get("mean", 0.0)
+                    )
+                    features_df.loc[:, missing_col] = mean_val
 
         # Normalize using stored stats
         norm_df = features_df.copy()
@@ -253,26 +292,38 @@ class PredictionService:
                 std = self.normalization_stats[col]["std"] or 1.0
                 norm_df[col] = (norm_df[col] - mean) / std
 
-        weight_mean = float(self.normalization_stats.get("pds", {}).get("mean", 0.0) or 0.0)
+        weight_mean = float(
+            self.normalization_stats.get("pds", {}).get("mean", 0.0) or 0.0
+        )
         norm_df["pds_normalized"] = norm_df["pds"] - weight_mean
 
-        use_numpy = self._should_use_numpy() if backend is None else (backend.lower() == "numpy")
+        use_numpy = (
+            self._should_use_numpy()
+            if backend is None
+            else (backend.lower() == "numpy")
+        )
         if use_numpy:
             # NumPy path (lazy load)
             if self.np_model is None:
                 from app.np_infer import load_numpy_weights, NumpyFinalModel  # noqa: WPS433
+
                 weights = load_numpy_weights(self.npz_path)
                 gru_w = weights.get("gru.weight_hh_l0")
                 head_w = weights.get("head.0.weight")
                 hidden_size = gru_w.shape[1]
                 input_size = head_w.shape[1] - hidden_size
-                num_layers = sum(1 for k in weights.keys() if k.startswith("gru.weight_ih_l"))
-                self.np_model = NumpyFinalModel(weights, input_size, hidden_size, num_layers)
+                num_layers = sum(
+                    1 for k in weights.keys() if k.startswith("gru.weight_ih_l")
+                )
+                self.np_model = NumpyFinalModel(
+                    weights, input_size, hidden_size, num_layers
+                )
             obs_np = norm_df["pds_normalized"].values.astype("float32")[None, :]
             nut_np = norm_df[nutrition_cols].values.astype("float32")[None, :, :]
             sport_np = norm_df["sport"].values.astype("float32")[None, :]
             base_metabolisms = self.np_model.forward(nut_np)
             from app.np_infer import reconstruct_trajectory_numpy  # noqa: WPS433
+
             predicted_observed_weight, w_adj_pred = reconstruct_trajectory_numpy(
                 obs_np,
                 base_metabolisms,
@@ -287,10 +338,15 @@ class PredictionService:
                 import torch  # noqa: WPS433
                 from train_model import reconstruct_trajectory  # noqa: WPS433
             except Exception as e:
-                raise HTTPException(status_code=503, detail=f"Torch backend unavailable: {e}")
-            weight_mean = float(self.normalization_stats.get("pds", {}).get("mean", 0.0) or 0.0)
+                raise HTTPException(
+                    status_code=503, detail=f"Torch backend unavailable: {e}"
+                )
+            weight_mean = float(
+                self.normalization_stats.get("pds", {}).get("mean", 0.0) or 0.0
+            )
             observed_weights = torch.tensor(
-                (norm_df["pds_normalized"].values).astype("float32"), dtype=torch.float32
+                (norm_df["pds_normalized"].values).astype("float32"),
+                dtype=torch.float32,
             ).unsqueeze(0)
             nutrition_data = torch.tensor(
                 norm_df[nutrition_cols].values.astype("float32"), dtype=torch.float32
@@ -317,6 +373,7 @@ class PredictionService:
         # De-normalize outputs
         # Convert results to numpy uniformly
         import numpy as _np
+
         base_metabolisms_np = base_metabolisms.squeeze()
         w_adj_np = w_adj_pred.squeeze()
         base_metabolisms_kcal = base_metabolisms_np * 1000.0
@@ -351,18 +408,50 @@ _PREDICT_CACHE: dict[str, dict] = {}
 
 @app.on_event("startup")
 async def startup_event():
-    # Warm the plot cache in the background so first user hits are fast
-    def _warm_cache() -> None:
-        try:
-            # Compute once; get_plot_data will populate the cache
-            _ = get_plot_data(last_n=None)
-        except Exception:
-            # Best effort; failures are non-fatal
-            pass
+    """Precompute predictions and plots at startup so first requests are fast.
+
+    We build plot data from the DB path to avoid CSV downloads and populate the
+    in-memory cache synchronously. Failures are non-fatal; the server will still
+    start and compute lazily on first request.
+    """
+    try:
+        # Build and cache plot data using DB aggregates (also warms model weights)
+        _ = get_plot_data(last_n=None, source="db")
+    except Exception:
+        # Best effort only
+        pass
+
+    # Schedule daily rebuild at midnight UTC and start backup scheduler
+    def _midnight_rebuild_loop() -> None:
+        import time as _time
+
+        while True:
+            try:
+                now = datetime.now(timezone.utc)
+                next_midnight = (now + timedelta(days=1)).replace(
+                    hour=0, minute=0, second=0, microsecond=0
+                )
+                sleep_seconds = max(1.0, (next_midnight - now).total_seconds())
+                _time.sleep(sleep_seconds)
+                try:
+                    _ = get_plot_data(last_n=None, source="db")
+                except Exception:
+                    # Ignore and try again the next day
+                    pass
+            except Exception:
+                # Backoff a bit on unexpected errors
+                _time.sleep(60.0)
 
     try:
-        t = Thread(target=_warm_cache, daemon=True)
+        t = Thread(target=_midnight_rebuild_loop, daemon=True)
         t.start()
+    except Exception:
+        pass
+    # Start backup scheduler in background (best-effort)
+    try:
+        from app.routers.admin import start_backup_scheduler_internal
+
+        _ = start_backup_scheduler_internal()
     except Exception:
         pass
     return None
@@ -384,13 +473,21 @@ async def get_latest_prediction(source: str | None = None, backend: str | None =
                 cached = _PREDICT_CACHE.get(src_key)
             if cached is not None and isinstance(cached.get("outputs"), dict):
                 outputs = cached["outputs"]
-                latest_idx = int(cached.get("latest_idx", len(outputs.get("base_metabolism_kcal", [])) - 1))
+                latest_idx = int(
+                    cached.get(
+                        "latest_idx", len(outputs.get("base_metabolism_kcal", [])) - 1
+                    )
+                )
                 return {
                     "latest": {
                         "actual_weight": outputs["actual_weight"][latest_idx],
-                        "predicted_adjusted_weight": outputs["predicted_adjusted_weight"][latest_idx],
+                        "predicted_adjusted_weight": outputs[
+                            "predicted_adjusted_weight"
+                        ][latest_idx],
                         "water_retention": outputs["water_retention"][latest_idx],
-                        "base_metabolism_kcal": outputs["base_metabolism_kcal"][latest_idx],
+                        "base_metabolism_kcal": outputs["base_metabolism_kcal"][
+                            latest_idx
+                        ],
                     },
                     "series": outputs,
                 }
@@ -399,7 +496,9 @@ async def get_latest_prediction(source: str | None = None, backend: str | None =
         try:
             from build_features import main as build_features_main
         except Exception as e:
-            raise HTTPException(status_code=503, detail=f"CSV features unavailable: {e}")
+            raise HTTPException(
+                status_code=503, detail=f"CSV features unavailable: {e}"
+            )
         # Resolve CSVs from common locations or URLs
         cand_roots = [
             os.getcwd(),
@@ -424,11 +523,15 @@ async def get_latest_prediction(source: str | None = None, backend: str | None =
                 csv_journal, csv_variables = j, v
                 break
         if not (csv_journal and csv_variables):
-            raise HTTPException(status_code=503, detail="CSV features missing (checked env URLs, cwd, /app, repo roots)")
+            raise HTTPException(
+                status_code=503,
+                detail="CSV features missing (checked env URLs, cwd, /app, repo roots)",
+            )
         try:
             # If URLs provided, download to temp files to satisfy data_processor's os.path.exists checks
             if csv_journal.startswith("http") or csv_variables.startswith("http"):
                 import tempfile, requests
+
                 with tempfile.TemporaryDirectory() as td:
                     jp = os.path.join(td, "processed_journal.csv")
                     vp = os.path.join(td, "variables.csv")
@@ -445,7 +548,12 @@ async def get_latest_prediction(source: str | None = None, backend: str | None =
                 # Prefer a precomputed features CSV if present to avoid heavy recomputation on small instances
                 try:
                     feat_csv = None
-                    for root in [os.getcwd(), "/app", str(pathlib.Path(__file__).resolve().parents[1]), str(pathlib.Path(__file__).resolve().parents[2])]:
+                    for root in [
+                        os.getcwd(),
+                        "/app",
+                        str(pathlib.Path(__file__).resolve().parents[1]),
+                        str(pathlib.Path(__file__).resolve().parents[2]),
+                    ]:
                         candidate = os.path.join(root, "data", "features.csv")
                         if os.path.exists(candidate):
                             feat_csv = candidate
@@ -453,11 +561,17 @@ async def get_latest_prediction(source: str | None = None, backend: str | None =
                     if feat_csv is not None:
                         raw_df = pd.read_csv(feat_csv)
                     else:
-                        raw_df = build_features_main(journal_path=csv_journal, variables_path=csv_variables)
+                        raw_df = build_features_main(
+                            journal_path=csv_journal, variables_path=csv_variables
+                        )
                 except Exception:
-                    raw_df = build_features_main(journal_path=csv_journal, variables_path=csv_variables)
+                    raw_df = build_features_main(
+                        journal_path=csv_journal, variables_path=csv_variables
+                    )
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to build CSV features: {e}")
+            raise HTTPException(
+                status_code=500, detail=f"Failed to build CSV features: {e}"
+            )
         df_feat = raw_df.copy()
         if "Date" in df_feat.columns:
             dt = pd.to_datetime(df_feat["Date"], errors="coerce")
@@ -465,23 +579,77 @@ async def get_latest_prediction(source: str | None = None, backend: str | None =
         elif df_feat.index.dtype_str.startswith("datetime"):
             df_feat = df_feat.reset_index().rename(columns={df_feat.columns[0]: "date"})
         else:
-            raise HTTPException(status_code=500, detail="CSV features missing Date index/column")
-        for col in ["calories", "carbs", "sugar", "sel", "alcool", "water", "sport", "pds"]:
+            raise HTTPException(
+                status_code=500, detail="CSV features missing Date index/column"
+            )
+        for col in [
+            "calories",
+            "carbs",
+            "sugar",
+            "sel",
+            "alcool",
+            "water",
+            "sport",
+            "pds",
+        ]:
             if col not in df_feat.columns:
                 df_feat[col] = 0.0
             df_feat[col] = pd.to_numeric(df_feat[col], errors="coerce").fillna(0)
-        features_df = df_feat[["date", "calories", "carbs", "sugar", "sel", "alcool", "water", "sport", "pds"]]
+        features_df = df_feat[
+            [
+                "date",
+                "calories",
+                "carbs",
+                "sugar",
+                "sel",
+                "alcool",
+                "water",
+                "sport",
+                "pds",
+            ]
+        ]
         # Cache inputs to speed subsequent requests
         try:
             with _PREDICT_CACHE_LOCK:
-                _PREDICT_CACHE[src_key] = {"features_df_head": features_df.head(1).to_dict(), "ts": pd.Timestamp.utcnow().isoformat()}
+                _PREDICT_CACHE[src_key] = {
+                    "features_df_head": features_df.head(1).to_dict(),
+                    "ts": pd.Timestamp.utcnow().isoformat(),
+                }
         except Exception:
             pass
     else:
+        # Try serving DB-based predictions from cache if present
+        try:
+            with _PREDICT_CACHE_LOCK:
+                cached = _PREDICT_CACHE.get(src_key)
+            if cached is not None and isinstance(cached.get("outputs"), dict):
+                outputs = cached["outputs"]
+                latest_idx = int(
+                    cached.get(
+                        "latest_idx", len(outputs.get("base_metabolism_kcal", [])) - 1
+                    )
+                )
+                return {
+                    "latest": {
+                        "actual_weight": outputs["actual_weight"][latest_idx],
+                        "predicted_adjusted_weight": outputs[
+                            "predicted_adjusted_weight"
+                        ][latest_idx],
+                        "water_retention": outputs["water_retention"][latest_idx],
+                        "base_metabolism_kcal": outputs["base_metabolism_kcal"][
+                            latest_idx
+                        ],
+                    },
+                    "series": outputs,
+                }
+        except Exception:
+            pass
         db = SessionLocal()
         try:
             # Aggregate minimal features per day from DB
-            date_expr_fl = func.coalesce(FoodLog.logged_date, func.date(FoodLog.logged_at))
+            date_expr_fl = func.coalesce(
+                FoodLog.logged_date, func.date(FoodLog.logged_at)
+            )
             food_rows = (
                 db.query(
                     date_expr_fl.label("date"),
@@ -491,20 +659,33 @@ async def get_latest_prediction(source: str | None = None, backend: str | None =
                 .group_by(date_expr_fl)
                 .all()
             )
-            date_expr_sa = func.coalesce(SportActivity.logged_date, func.date(SportActivity.logged_at))
+            date_expr_sa = func.coalesce(
+                SportActivity.logged_date, func.date(SportActivity.logged_at)
+            )
             sport_rows = (
                 db.query(
                     date_expr_sa.label("date"),
-                    func.coalesce(func.sum(SportActivity.calories_expended), 0.0).label("sport"),
+                    func.coalesce(func.sum(SportActivity.calories_expended), 0.0).label(
+                        "sport"
+                    ),
                 )
                 .group_by(date_expr_sa)
                 .all()
             )
         finally:
             db.close()
-        dates = sorted({r.date for r in food_rows} | {r.date for r in sport_rows})
+        # Exclude today's logs; predictions should rely only on complete past days
+        today_utc = datetime.utcnow().date()
+        dates = sorted(
+            d
+            for d in ({r.date for r in food_rows} | {r.date for r in sport_rows})
+            if d < today_utc
+        )
         if not dates:
-            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="No DB data available for prediction.")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="No DB data available for prediction.",
+            )
         food_by_date = {r.date: r for r in food_rows}
         sport_by_date = {r.date: r for r in sport_rows}
         records: list[dict] = []
@@ -527,22 +708,23 @@ async def get_latest_prediction(source: str | None = None, backend: str | None =
             )
         features_df = pd.DataFrame(records)
     outputs = prediction_service.predict_from_features(features_df, backend=backend)
-    # Populate cache for CSV source
+    # Populate cache for future requests
     try:
-        if src_key == "csv":
-            with _PREDICT_CACHE_LOCK:
-                _PREDICT_CACHE[src_key] = {
-                    "outputs": outputs,
-                    "latest_idx": len(features_df) - 1,
-                    "ts": pd.Timestamp.utcnow().isoformat(),
-                }
+        with _PREDICT_CACHE_LOCK:
+            _PREDICT_CACHE[src_key] = {
+                "outputs": outputs,
+                "latest_idx": len(features_df) - 1,
+                "ts": pd.Timestamp.utcnow().isoformat(),
+            }
     except Exception:
         pass
     latest_idx = len(features_df) - 1
     return {
         "latest": {
             "actual_weight": outputs["actual_weight"][latest_idx],
-            "predicted_adjusted_weight": outputs["predicted_adjusted_weight"][latest_idx],
+            "predicted_adjusted_weight": outputs["predicted_adjusted_weight"][
+                latest_idx
+            ],
             "water_retention": outputs["water_retention"][latest_idx],
             "base_metabolism_kcal": outputs["base_metabolism_kcal"][latest_idx],
         },
@@ -592,25 +774,34 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
             rows = db.query(DailySummary).order_by(DailySummary.date.asc()).all()
             if not rows:
                 return pd.DataFrame(columns=expected_cols)
-            df = pd.DataFrame([
-                {
-                    "date": r.date,
-                    "calories": r.calories_total or 0.0,
-                    "sport": r.sport_calories_total or 0.0,
-                }
-                for r in rows
-            ])
+            df = pd.DataFrame(
+                [
+                    {
+                        "date": r.date,
+                        "calories": r.calories_total or 0.0,
+                        "sport": r.sport_calories_total or 0.0,
+                    }
+                    for r in rows
+                ]
+            )
             # Sum across users per date
             df = df.groupby("date", as_index=False).sum(numeric_only=True)
             # Join observed weights if any
-            date_expr_w = func.coalesce(WeightLog.logged_date, func.date(WeightLog.logged_at))
+            date_expr_w = func.coalesce(
+                WeightLog.logged_date, func.date(WeightLog.logged_at)
+            )
             w_rows = (
-                db.query(date_expr_w.label("date"), func.avg(WeightLog.weight_kg).label("W_obs"))
+                db.query(
+                    date_expr_w.label("date"),
+                    func.avg(WeightLog.weight_kg).label("W_obs"),
+                )
                 .group_by(date_expr_w)
                 .all()
             )
             if w_rows:
-                w_df = pd.DataFrame([{"date": r.date, "W_obs": float(r.W_obs or 0)} for r in w_rows])
+                w_df = pd.DataFrame(
+                    [{"date": r.date, "W_obs": float(r.W_obs or 0)} for r in w_rows]
+                )
                 df = df.merge(w_df, on="date", how="left")
             else:
                 df["W_obs"] = pd.Series(dtype=float)
@@ -626,8 +817,12 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
         try:
             # collect all distinct dates from both tables
             food_dates = [d[0] for d in db.query(FoodLog.logged_date).distinct().all()]
-            sport_dates = [d[0] for d in db.query(SportActivity.logged_date).distinct().all()]
-            date_expr_w = func.coalesce(WeightLog.logged_date, func.date(WeightLog.logged_at))
+            sport_dates = [
+                d[0] for d in db.query(SportActivity.logged_date).distinct().all()
+            ]
+            date_expr_w = func.coalesce(
+                WeightLog.logged_date, func.date(WeightLog.logged_at)
+            )
             weight_dates = [d[0] for d in db.query(date_expr_w).distinct().all()]
             all_dates = sorted({*food_dates, *sport_dates, *weight_dates})
             if not all_dates:
@@ -647,13 +842,17 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
                     .first()
                 )
                 sport_total = (
-                    db.query(func.coalesce(func.sum(SportActivity.calories_expended), 0.0))
+                    db.query(
+                        func.coalesce(func.sum(SportActivity.calories_expended), 0.0)
+                    )
                     .filter(SportActivity.logged_date == d)
                     .scalar()
                     or 0.0
                 )
                 # Observed weight: average per day across all users for public plots
-                date_expr_w = func.coalesce(WeightLog.logged_date, func.date(WeightLog.logged_at))
+                date_expr_w = func.coalesce(
+                    WeightLog.logged_date, func.date(WeightLog.logged_at)
+                )
                 w_obs = (
                     db.query(func.avg(WeightLog.weight_kg))
                     .filter(date_expr_w == d)
@@ -712,6 +911,7 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
         try:
             if csv_journal.startswith("http") or csv_variables.startswith("http"):
                 import tempfile, requests
+
                 with tempfile.TemporaryDirectory() as td:
                     jp = os.path.join(td, "processed_journal.csv")
                     vp = os.path.join(td, "variables.csv")
@@ -723,15 +923,21 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
                     rv.raise_for_status()
                     with open(vp, "wb") as f:
                         f.write(rv.content)
-                    features_df = build_features_main(journal_path=jp, variables_path=vp)
+                    features_df = build_features_main(
+                        journal_path=jp, variables_path=vp
+                    )
             else:
-                features_df = build_features_main(journal_path=csv_journal, variables_path=csv_variables)
+                features_df = build_features_main(
+                    journal_path=csv_journal, variables_path=csv_variables
+                )
             # Ensure required columns exist and numeric
             nutrition_cols = ["calories", "carbs", "sugar", "sel", "alcool", "water"]
             for col in nutrition_cols + ["pds", "sport"]:
                 if col not in features_df.columns:
                     features_df[col] = 0.0
-                features_df[col] = pd.to_numeric(features_df[col], errors="coerce").fillna(0)
+                features_df[col] = pd.to_numeric(
+                    features_df[col], errors="coerce"
+                ).fillna(0)
             # Ensure a date column exists
             df_feat = features_df.copy()
             if "Date" in df_feat.columns:
@@ -739,24 +945,42 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
                 dt = pd.to_datetime(df_feat["Date"], errors="coerce")
                 df_feat = df_feat.assign(date=dt)
             elif df_feat.index.name and str(df_feat.index.name).lower() == "date":
-                df_feat = df_feat.reset_index().rename(columns={df_feat.index.name: "date"})
+                df_feat = df_feat.reset_index().rename(
+                    columns={df_feat.index.name: "date"}
+                )
             elif df_feat.index.dtype_str.startswith("datetime"):
-                df_feat = df_feat.reset_index().rename(columns={df_feat.columns[0]: "date"})
+                df_feat = df_feat.reset_index().rename(
+                    columns={df_feat.columns[0]: "date"}
+                )
             else:
                 # Cannot establish timeline; bail out
                 return pd.DataFrame(columns=["date"] + expected_cols)
             # Run model exactly like parity script
-            outputs = prediction_service.predict_from_features(df_feat[[
-                "date", "calories", "carbs", "sugar", "sel", "alcool", "water", "sport", "pds"
-            ]].copy())
-            df = pd.DataFrame({
-                "date": df_feat["date"],
-                "W_obs": df_feat["pds"],
-                "W_adj_pred": outputs.get("predicted_adjusted_weight", []),
-                "M_base": outputs.get("base_metabolism_kcal", []),
-                "calories": df_feat.get("calories", 0),
-                "sport": df_feat.get("sport", 0),
-            })
+            outputs = prediction_service.predict_from_features(
+                df_feat[
+                    [
+                        "date",
+                        "calories",
+                        "carbs",
+                        "sugar",
+                        "sel",
+                        "alcool",
+                        "water",
+                        "sport",
+                        "pds",
+                    ]
+                ].copy()
+            )
+            df = pd.DataFrame(
+                {
+                    "date": df_feat["date"],
+                    "W_obs": df_feat["pds"],
+                    "W_adj_pred": outputs.get("predicted_adjusted_weight", []),
+                    "M_base": outputs.get("base_metabolism_kcal", []),
+                    "calories": df_feat.get("calories", 0),
+                    "sport": df_feat.get("sport", 0),
+                }
+            )
             return df
         except Exception:
             # If any issue, fall back to empty so other builders can try
@@ -767,7 +991,9 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
         db = SessionLocal()
         try:
             # Aggregate per day calories and carbs; set other nutrition features to 0
-            date_expr_fl = func.coalesce(FoodLog.logged_date, func.date(FoodLog.logged_at))
+            date_expr_fl = func.coalesce(
+                FoodLog.logged_date, func.date(FoodLog.logged_at)
+            )
             food_rows = (
                 db.query(
                     date_expr_fl.label("date"),
@@ -777,18 +1003,40 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
                 .group_by(date_expr_fl)
                 .all()
             )
-            date_expr_sa = func.coalesce(SportActivity.logged_date, func.date(SportActivity.logged_at))
+            date_expr_sa = func.coalesce(
+                SportActivity.logged_date, func.date(SportActivity.logged_at)
+            )
             sport_rows = (
                 db.query(
                     date_expr_sa.label("date"),
-                    func.coalesce(func.sum(SportActivity.calories_expended), 0.0).label("sport"),
+                    func.coalesce(func.sum(SportActivity.calories_expended), 0.0).label(
+                        "sport"
+                    ),
                 )
                 .group_by(date_expr_sa)
                 .all()
             )
-            dates = sorted({r.date for r in food_rows} | {r.date for r in sport_rows})
+            # Exclude today's date; predictions are based on complete past days only
+            today_utc = datetime.utcnow().date()
+            dates = sorted(
+                d
+                for d in ({r.date for r in food_rows} | {r.date for r in sport_rows})
+                if d < today_utc
+            )
             if not dates:
-                return pd.DataFrame(columns=["date", "calories", "carbs", "sugar", "sel", "alcool", "water", "sport", "pds"])  # empty
+                return pd.DataFrame(
+                    columns=[
+                        "date",
+                        "calories",
+                        "carbs",
+                        "sugar",
+                        "sel",
+                        "alcool",
+                        "water",
+                        "sport",
+                        "pds",
+                    ]
+                )  # empty
             food_by_date = {r.date: r for r in food_rows}
             sport_by_date = {r.date: r for r in sport_rows}
             records: list[dict] = []
@@ -828,6 +1076,16 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
         if features_df is not None and not features_df.empty:
             try:
                 outputs = prediction_service.predict_from_features(features_df)
+                # Seed prediction cache for DB source so /predict/latest is instant
+                try:
+                    with _PREDICT_CACHE_LOCK:
+                        _PREDICT_CACHE["db"] = {
+                            "outputs": outputs,
+                            "latest_idx": len(features_df) - 1,
+                            "ts": pd.Timestamp.utcnow().isoformat(),
+                        }
+                except Exception:
+                    pass
                 df = pd.DataFrame(
                     {
                         "date": features_df["date"],
@@ -842,17 +1100,33 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
                 try:
                     db_obs = SessionLocal()
                     try:
-                        date_expr_w = func.coalesce(WeightLog.logged_date, func.date(WeightLog.logged_at))
+                        date_expr_w = func.coalesce(
+                            WeightLog.logged_date, func.date(WeightLog.logged_at)
+                        )
                         w_rows = (
-                            db_obs.query(date_expr_w.label("date"), func.avg(WeightLog.weight_kg).label("W_obs"))
+                            db_obs.query(
+                                date_expr_w.label("date"),
+                                func.avg(WeightLog.weight_kg).label("W_obs"),
+                            )
                             .group_by(date_expr_w)
                             .all()
                         )
                         if w_rows:
-                            w_df = pd.DataFrame([{"date": r.date, "W_obs": float(r.W_obs or 0)} for r in w_rows])
-                            df = df.merge(w_df, on="date", how="left", suffixes=("", "_db"))
+                            w_df = pd.DataFrame(
+                                [
+                                    {"date": r.date, "W_obs": float(r.W_obs or 0)}
+                                    for r in w_rows
+                                ]
+                            )
+                            df = df.merge(
+                                w_df, on="date", how="left", suffixes=("", "_db")
+                            )
                             if "W_obs_db" in df.columns:
-                                df["W_obs"] = df["W_obs_db"].where(pd.notnull(df["W_obs_db"]), df["W_obs"]).astype(float)
+                                df["W_obs"] = (
+                                    df["W_obs_db"]
+                                    .where(pd.notnull(df["W_obs_db"]), df["W_obs"])
+                                    .astype(float)
+                                )
                                 df.drop(columns=["W_obs_db"], inplace=True)
                     finally:
                         db_obs.close()
@@ -868,6 +1142,16 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
             if features_df is not None and not features_df.empty:
                 try:
                     outputs = prediction_service.predict_from_features(features_df)
+                    # Seed prediction cache for DB source in auto mode as well
+                    try:
+                        with _PREDICT_CACHE_LOCK:
+                            _PREDICT_CACHE["db"] = {
+                                "outputs": outputs,
+                                "latest_idx": len(features_df) - 1,
+                                "ts": pd.Timestamp.utcnow().isoformat(),
+                            }
+                    except Exception:
+                        pass
                     df = pd.DataFrame(
                         {
                             "date": features_df["date"],
@@ -881,17 +1165,33 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
                     try:
                         db_obs = SessionLocal()
                         try:
-                            date_expr_w = func.coalesce(WeightLog.logged_date, func.date(WeightLog.logged_at))
+                            date_expr_w = func.coalesce(
+                                WeightLog.logged_date, func.date(WeightLog.logged_at)
+                            )
                             w_rows = (
-                                db_obs.query(date_expr_w.label("date"), func.avg(WeightLog.weight_kg).label("W_obs"))
+                                db_obs.query(
+                                    date_expr_w.label("date"),
+                                    func.avg(WeightLog.weight_kg).label("W_obs"),
+                                )
                                 .group_by(date_expr_w)
                                 .all()
                             )
                             if w_rows:
-                                w_df = pd.DataFrame([{"date": r.date, "W_obs": float(r.W_obs or 0)} for r in w_rows])
-                                df = df.merge(w_df, on="date", how="left", suffixes=("", "_db"))
+                                w_df = pd.DataFrame(
+                                    [
+                                        {"date": r.date, "W_obs": float(r.W_obs or 0)}
+                                        for r in w_rows
+                                    ]
+                                )
+                                df = df.merge(
+                                    w_df, on="date", how="left", suffixes=("", "_db")
+                                )
                                 if "W_obs_db" in df.columns:
-                                    df["W_obs"] = df["W_obs_db"].where(pd.notnull(df["W_obs_db"]), df["W_obs"]).astype(float)
+                                    df["W_obs"] = (
+                                        df["W_obs_db"]
+                                        .where(pd.notnull(df["W_obs_db"]), df["W_obs"])
+                                        .astype(float)
+                                    )
                                     df.drop(columns=["W_obs_db"], inplace=True)
                         finally:
                             db_obs.close()
@@ -957,7 +1257,9 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
                 params = json.load(f)
                 normalization_stats = params.get("normalization", {})
                 calories_mean = normalization_stats.get("calories", {}).get("mean", 0.0)
-                calories_std = normalization_stats.get("calories", {}).get("std", 1.0) or 1.0
+                calories_std = (
+                    normalization_stats.get("calories", {}).get("std", 1.0) or 1.0
+                )
                 sport_mean = normalization_stats.get("sport", {}).get("mean", 0.0)
                 sport_std = normalization_stats.get("sport", {}).get("std", 1.0) or 1.0
         except Exception:
@@ -994,6 +1296,7 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
 @app.get("/api/v1/plots/debug", tags=["plots"])
 def plots_debug():
     from urllib.parse import urlparse
+
     db_url = os.environ.get("DATABASE_URL", "")
     parsed = urlparse(db_url) if db_url else None
     host = parsed.hostname if parsed else None
@@ -1014,14 +1317,26 @@ def plots_debug():
     try:
         db = SessionLocal()
         try:
-            debug["db_daily_summaries"] = int(db.query(func.count(DailySummary.id)).scalar() or 0)
+            debug["db_daily_summaries"] = int(
+                db.query(func.count(DailySummary.id)).scalar() or 0
+            )
             dfl = func.coalesce(FoodLog.logged_date, func.date(FoodLog.logged_at))
-            dsa = func.coalesce(SportActivity.logged_date, func.date(SportActivity.logged_at))
-            debug["db_food_days"] = int(db.query(func.count(func.distinct(dfl))).scalar() or 0)
-            debug["db_sport_days"] = int(db.query(func.count(func.distinct(dsa))).scalar() or 0)
+            dsa = func.coalesce(
+                SportActivity.logged_date, func.date(SportActivity.logged_at)
+            )
+            debug["db_food_days"] = int(
+                db.query(func.count(func.distinct(dfl))).scalar() or 0
+            )
+            debug["db_sport_days"] = int(
+                db.query(func.count(func.distinct(dsa))).scalar() or 0
+            )
             dwt = func.coalesce(WeightLog.logged_date, func.date(WeightLog.logged_at))
-            debug["db_weight_days"] = int(db.query(func.count(func.distinct(dwt))).scalar() or 0)
-            debug["db_weight_rows"] = int(db.query(func.count(WeightLog.id)).scalar() or 0)
+            debug["db_weight_days"] = int(
+                db.query(func.count(func.distinct(dwt))).scalar() or 0
+            )
+            debug["db_weight_rows"] = int(
+                db.query(func.count(WeightLog.id)).scalar() or 0
+            )
         finally:
             db.close()
     except Exception as e:
@@ -1036,8 +1351,14 @@ def plots_debug():
     try:
         app_vars = pathlib.Path("/app/data/variables.csv")
         app_journal = pathlib.Path("/app/data/processed_journal.csv")
-        repo_vars = pathlib.Path(__file__).resolve().parents[2] / "data" / "variables.csv"
-        repo_journal = pathlib.Path(__file__).resolve().parents[2] / "data" / "processed_journal.csv"
+        repo_vars = (
+            pathlib.Path(__file__).resolve().parents[2] / "data" / "variables.csv"
+        )
+        repo_journal = (
+            pathlib.Path(__file__).resolve().parents[2]
+            / "data"
+            / "processed_journal.csv"
+        )
         cwd_vars = pathlib.Path.cwd() / "data" / "variables.csv"
         cwd_journal = pathlib.Path.cwd() / "data" / "processed_journal.csv"
         debug["csv_paths"] = {
@@ -1056,11 +1377,15 @@ def plots_debug():
     # Extra diagnostics for model/params presence and DL path
     try:
         debug["has_npz"] = os.path.exists(prediction_service.npz_path)
-        debug["has_params"] = os.path.exists(prediction_service.params_path) or os.path.exists("/app/models/best_params.json")
+        debug["has_params"] = os.path.exists(
+            prediction_service.params_path
+        ) or os.path.exists("/app/models/best_params.json")
         # Build a tiny features DF like /predict/latest uses
         db = SessionLocal()
         try:
-            date_expr_fl = func.coalesce(FoodLog.logged_date, func.date(FoodLog.logged_at))
+            date_expr_fl = func.coalesce(
+                FoodLog.logged_date, func.date(FoodLog.logged_at)
+            )
             food_rows = (
                 db.query(
                     date_expr_fl.label("date"),
@@ -1071,11 +1396,15 @@ def plots_debug():
                 .order_by(date_expr_fl)
                 .all()
             )
-            date_expr_sa = func.coalesce(SportActivity.logged_date, func.date(SportActivity.logged_at))
+            date_expr_sa = func.coalesce(
+                SportActivity.logged_date, func.date(SportActivity.logged_at)
+            )
             sport_rows = (
                 db.query(
                     date_expr_sa.label("date"),
-                    func.coalesce(func.sum(SportActivity.calories_expended), 0.0).label("sport"),
+                    func.coalesce(func.sum(SportActivity.calories_expended), 0.0).label(
+                        "sport"
+                    ),
                 )
                 .group_by(date_expr_sa)
                 .order_by(date_expr_sa)
@@ -1111,16 +1440,27 @@ def plots_debug():
                 outs = prediction_service.predict_from_features(feat)
                 debug["dl_ok"] = True
                 debug["dl_series_keys"] = list(outs.keys())
-                debug["dl_w_adj_len"] = int(len(outs.get("predicted_adjusted_weight", [])))
+                debug["dl_w_adj_len"] = int(
+                    len(outs.get("predicted_adjusted_weight", []))
+                )
                 debug["dl_m_base_len"] = int(len(outs.get("base_metabolism_kcal", [])))
                 # Show min/max to catch all-zero
                 import numpy as _np
-                w_adj = _np.asarray(outs.get("predicted_adjusted_weight", []), dtype=float)
+
+                w_adj = _np.asarray(
+                    outs.get("predicted_adjusted_weight", []), dtype=float
+                )
                 m_base = _np.asarray(outs.get("base_metabolism_kcal", []), dtype=float)
                 if w_adj.size:
-                    debug["dl_w_adj_minmax"] = [float(_np.nanmin(w_adj)), float(_np.nanmax(w_adj))]
+                    debug["dl_w_adj_minmax"] = [
+                        float(_np.nanmin(w_adj)),
+                        float(_np.nanmax(w_adj)),
+                    ]
                 if m_base.size:
-                    debug["dl_m_base_minmax"] = [float(_np.nanmin(m_base)), float(_np.nanmax(m_base))]
+                    debug["dl_m_base_minmax"] = [
+                        float(_np.nanmin(m_base)),
+                        float(_np.nanmax(m_base)),
+                    ]
             except Exception as ee:
                 debug["dl_ok"] = False
                 debug["dl_error"] = str(ee)
@@ -1135,6 +1475,7 @@ def plots_debug():
 @app.get("/api/v1/plots/weight", response_model=WeightPlotResponse, tags=["plots"])
 def get_weight_plot_data(days: int | None = None, source: str | None = None):
     df = get_plot_data(last_n=days, source=source)
+
     # Enforce presence of observed weights; no fallback
     # Only include observed weights that are non-null and non-zero
     w_obs = [
@@ -1148,7 +1489,9 @@ def get_weight_plot_data(days: int | None = None, source: str | None = None):
         if pd.notnull(row.get("W_adj_pred"))
     ]
     if not w_obs:
-        raise HTTPException(status_code=404, detail="Observed weights unavailable in DB")
+        raise HTTPException(
+            status_code=404, detail="Observed weights unavailable in DB"
+        )
     return WeightPlotResponse(W_obs=w_obs, W_adj_pred=w_adj)
 
 
@@ -1219,4 +1562,6 @@ def rebuild_plots_data():
         rows = int(len(df))
         return {"status": "ok", "rows": rows}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to rebuild plots data: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to rebuild plots data: {e}"
+        )

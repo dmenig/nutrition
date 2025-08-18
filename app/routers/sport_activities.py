@@ -10,7 +10,7 @@ from app.db.models import SportActivity, User
 from app.db.database import get_db
 from app.core.auth import get_current_user
 from sport_formulas import MET_VALUES, evaluate_sport_formula
-from app.services.summary import upsert_daily_summary
+from app.services.summary import upsert_daily_summary, rebuild_predictions_cache_async
 
 router = APIRouter()
 
@@ -56,6 +56,13 @@ def create_sport_activity(
     db.refresh(db_sport_activity)
     # Update daily summary for the day
     upsert_daily_summary(db, db_sport_activity.logged_at, current_user.id)
+    # Rebuild predictions if a past day was modified
+    try:
+        today_utc = datetime.utcnow().date()
+        if db_sport_activity.logged_at.date() < today_utc:
+            rebuild_predictions_cache_async()
+    except Exception:
+        pass
     return db_sport_activity
 
 
@@ -113,6 +120,13 @@ def delete_sport_activity(
     db.delete(db_sport_activity)
     db.commit()
     upsert_daily_summary(db, day, current_user.id)
+    # Rebuild predictions if a past day was modified
+    try:
+        today_utc = datetime.utcnow().date()
+        if day.date() < today_utc:
+            rebuild_predictions_cache_async()
+    except Exception:
+        pass
     return
 
 

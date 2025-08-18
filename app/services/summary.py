@@ -179,3 +179,29 @@ def backfill_all_summaries(db: Session, user_id) -> int:
     return len(rows)
 
 
+def rebuild_predictions_cache_async() -> None:
+    """Trigger a background rebuild of prediction/plot caches.
+
+    This imports the app module lazily to avoid circular imports at module load
+    time, then recomputes DB-based plot data which also seeds the prediction
+    cache for the "db" source.
+    """
+    import threading
+
+    def _do_rebuild() -> None:
+        try:
+            # Lazy import to avoid circular import issues
+            from app import main as app_main  # type: ignore
+
+            _ = app_main.get_plot_data(last_n=None, source="db")
+        except Exception:
+            # Best effort: ignore errors; endpoints will compute on demand
+            pass
+
+    try:
+        t = threading.Thread(target=_do_rebuild, daemon=True)
+        t.start()
+    except Exception:
+        # If thread cannot start, skip silently
+        pass
+
