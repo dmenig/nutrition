@@ -1456,30 +1456,6 @@ def plots_debug():
 @app.get("/api/v1/plots/weight", response_model=WeightPlotResponse, tags=["plots"])
 def get_weight_plot_data(days: int | None = None, source: str | None = None):
     df = get_plot_data(last_n=days, source=source)
-    # Align predicted weights to observed ones when overlap exists to avoid large offsets
-    try:
-        if "W_obs" in df.columns and "W_adj_pred" in df.columns:
-            obs_mask = pd.notnull(df["W_obs"]) & (
-                pd.to_numeric(df["W_obs"], errors="coerce") > 0
-            )
-            pred_mask = pd.notnull(df["W_adj_pred"]) & pd.notnull(df["time_index"])
-            if obs_mask.any() and pred_mask.any():
-                # Find the last index where both observed and predicted exist
-                overlap_idx = df.index[obs_mask & pred_mask]
-                if len(overlap_idx) > 0:
-                    last_idx = overlap_idx[-1]
-                    try:
-                        offset = float(df.loc[last_idx, "W_obs"]) - float(
-                            df.loc[last_idx, "W_adj_pred"]
-                        )
-                        df["W_adj_pred"] = (
-                            pd.to_numeric(df["W_adj_pred"], errors="coerce") + offset
-                        )
-                    except Exception:
-                        pass
-    except Exception:
-        # Non-fatal alignment; proceed with raw values if any error
-        pass
 
     # Enforce presence of observed weights; no fallback
     # Only include observed weights that are non-null and non-zero
