@@ -26,6 +26,7 @@ env/
 
 # Data and model outputs
 data/
+!data/*.xlsx
 *.pth
 *.png
 best_params.json
