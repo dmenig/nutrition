@@ -49,8 +49,8 @@ class FinalModel(nn.Module):
 
             # Predict metabolism increment for smoothness
             metabolism_increment = (
-                torch.tanh(self.metabolism_increment_head(combined_input)) * 0.125
-            )  # Max 125 kcal change/day
+                torch.tanh(self.metabolism_increment_head(combined_input)) * 0.2
+            )  # Max 200 kcal change/day
             current_metabolism = current_metabolism + metabolism_increment
             base_metabolisms.append(current_metabolism)
 
@@ -104,7 +104,7 @@ def calculate_loss(
     # Loss component 1: Match the observed weight, with a gentle weight on recent data
     seq_len = observed_weights.shape[1]
     time_weights = torch.linspace(
-        0.8, 1.2, steps=seq_len, device=observed_weights.device
+        0.7, 1.5, steps=seq_len, device=observed_weights.device
     ).unsqueeze(0)
     squared_errors = (predicted_observed_weight - observed_weights) ** 2
     loss_fit = torch.mean(squared_errors * time_weights)

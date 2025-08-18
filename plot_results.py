@@ -13,23 +13,43 @@ except FileNotFoundError:
 df["time_index"] = range(len(df))
 plot_index = "time_index"
 
-# De-normalize calories and sport for plotting
-# Note: This assumes 'best_params.json' was saved by the training script
+# Determine if calories/sport are normalized (z-scores) or absolute kcal.
+# Heuristic: if the 95th percentile is < 1000, treat as normalized and de-normalize
+# using models/best_params.json; otherwise pass-through.
 import json
 
-with open("models/best_params.json", "r") as f:
-    params = json.load(f)
-    normalization_stats = params["normalization"]
+cal_raw = pd.to_numeric(df["calories"], errors="coerce")
+sport_raw = pd.to_numeric(df["sport"], errors="coerce")
 
-df["calories_unnorm"] = (
-    df["calories"] * normalization_stats["calories"]["std"]
-    + normalization_stats["calories"]["mean"]
-)
-df["sport_unnorm"] = (
-    df["sport"] * normalization_stats["sport"]["std"]
-    + normalization_stats["sport"]["mean"]
-)
-df["C_exp_t"] = df["M_base"] + df["sport_unnorm"]
+cal_p95 = cal_raw.quantile(0.95)
+sport_p95 = sport_raw.quantile(0.95)
+
+norm_stats = None
+try:
+    with open("models/best_params.json", "r") as f:
+        params = json.load(f)
+        norm_stats = params.get("normalization", {})
+except Exception:
+    norm_stats = None
+
+def maybe_denorm(series: pd.Series, key: str) -> pd.Series:
+    if norm_stats is None or key not in norm_stats:
+        return pd.to_numeric(series, errors="coerce")
+    mean = float(norm_stats[key].get("mean", 0.0))
+    std = float(norm_stats[key].get("std", 1.0) or 1.0)
+    return pd.to_numeric(series, errors="coerce") * std + mean
+
+if cal_p95 is not None and cal_p95 < 1000:
+    df["calories_unnorm"] = maybe_denorm(df["calories"], "calories")
+else:
+    df["calories_unnorm"] = cal_raw
+
+if sport_p95 is not None and sport_p95 < 1000:
+    df["sport_unnorm"] = maybe_denorm(df["sport"], "sport")
+else:
+    df["sport_unnorm"] = sport_raw
+
+df["C_exp_t"] = pd.to_numeric(df["M_base"], errors="coerce") + df["sport_unnorm"]
 
 
 # --- Create Plots ---
