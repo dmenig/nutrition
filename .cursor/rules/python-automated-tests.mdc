@@ -1,0 +1,39 @@
+---
+alwaysApply: true
+---
+## Testing Standards
+
+### Test Design Principles
+- **Test final observable behavior**: Focus on complete result structures and actual data, not just presence or counts
+- **Minimize assertions**: Use single comprehensive assertions that verify the complete expected outcome
+- **Remove boilerplate**: Eliminate redundant checks like `len(result) == X` when the main assertion already covers it
+- **Test behavior, not implementation**: Verify what the function returns rather than how it works internally
+
+### Test Scope
+- **Do not test trivial instantiation**: Avoid tests that only construct simple objects (e.g., dataclasses/DTOs without behavior) or assert constants/defaults.
+- **Do not test invalid type arguments**: Type validation is enforced by static type checkers; only test domain validation (e.g., `ValueError`) for business rules, not cross-type inputs.
+
+### Assertion Guidelines
+- **Eliminate internal constants**: Prefer using plain values instead of internal constants
+- **Prefer comprehensive equality**: Use `assert result == expected_structure` over multiple individual checks
+- **Focus on data integrity**: Verify the complete structure matches expected format and content
+- **Eliminate low-signal checks**: Remove assertions that don't add meaningful validation
+
+### Example Pattern
+```python
+# Good: Single comprehensive assertion
+assert result == expected_structure
+
+# Avoid: Multiple redundant assertions
+assert len(result) == 1
+assert len(result["key"]["subkey"]) == 3
+assert "key" in result
+```
+
+### Test Setup
+- Keep setup minimal and focused on the specific behavior being tested
+- Use existing fixtures when possible rather than creating new ones
+- Mock only essential external dependencies
+
+### Documentation in Tests
+- Don't use docstrings nor documentation in tests.

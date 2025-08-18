@@ -197,7 +197,7 @@ def train_and_save_model(
     )
 
     print("Starting training with Final, Stable Model...")
-    for epoch in range(10):
+    for epoch in range(600):
         optimizer.zero_grad()
 
         base_metabolisms = model(nutrition_data)
@@ -362,7 +362,7 @@ if __name__ == "__main__":
     )
 
     print("Starting training with Final, Stable Model (standalone execution)...")
-    for epoch in range(10):
+    for epoch in range(600):
         optimizer.zero_grad()
 
         base_metabolisms = model(nutrition_data)

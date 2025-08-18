@@ -1,0 +1,66 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+This rule guides how the code must be designed and written.
+## Function Design Principles
+
+- **Substantial Logic Only**: Functions must contain enough logic to justify existence
+- **Type Hints**: Include type hints for better code clarity
+- **Minimize Prints**: Remove excessive print statements, keep only essential error handling
+- **No unnecessary error handling**: Do not write error handling code for internal only functions
+- **No unnecessary documentation**: Only write docstrings for user-facing functions or complex functions
+- **Remove Excessive Logging**: Remove development print statements
+- **Inline Simple Operations**: Inline simple string formatting and single-use builders
+- **Prevent Over-Abstraction**: Keep related operations together
+
+## File Organization Standards
+Keep files under workspace rules defined in project structure:
+
+- Functions under 30 lines
+- Prioritize readability and modularity
+- Write only necessary functions to execute the requested task
+- **Prefer editing over creating**: Prefer script edits over full script generation
+- Never generate unwanted MD files
+
+## Project Structure Standards
+
+### Core Libraries vs Orchestration
+- **veesion_data_core/**: Clean, installable library for data scientists to interact with pipelines
+  - Minimal dependencies
+  - Clean API surface
+  - No orchestration-specific code
+  - Should be installable as standalone package
+- **veesion_data_orchestration/**: Dagster-specific code for job and asset scheduling
+  - Contains orchestration logic
+  - Dagster resources and configurations
+  - Can have heavier dependencies
+
+### Clean Architecture Pattern
+Follow the repository pattern with clear separation of concerns (see training/ module as reference):
+
+- **domain/**: Pure business objects and interfaces
+  - Entity classes (e.g., TrainingRun, InferenceRequest)
+  - Repository interfaces (abstract base classes)
+  - Domain exceptions
+  - No external dependencies
+- **use_cases/**: Business logic and application services
+  - Orchestrate domain objects
+  - Implement business workflows
+  - Depend only on domain interfaces
+- **Repository implementations**: Concrete data access at module root
+  - Implement domain repository interfaces
+  - Handle external system interactions (DynamoDB, S3, etc.)
+  - Keep persistence logic separate from business logic
+
+### Testing Standards
+- **Use InMemory repository implementations** for unit tests
+  - Implement repository interfaces in memory (see conftest.py examples)
+  - Avoid mocking repository methods directly
+  - Test business logic without external dependencies
+- **InMemory repositories should**:
+  - Implement the same interface as production repositories
+  - Maintain state during test execution
+  - Provide helper methods for test setup (e.g., `with_training_runs()`)
+  - Raise the same domain exceptions as production implementations

@@ -1,0 +1,25 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+You must perform all the following checks after completing any code change. If a folder is provided, then only do the checks for the provided folder.
+
+## Quality Assurance Requirements
+Always run tests and linters after completing work using these standard commands:
+
+### Code Quality
+- `make ruff-format` for code formatting
+- `make lint-check-lib-main` for linting and type checking the main library
+- `make lint-check-lib-ds` for linting and type checking the data science components
+- `make lint-check-pkg` for linting and type checking the orchestration package
+
+### Testing
+- `make test-lib-main` for testing the main library
+- `make test-lib-ds` for testing the data science components
+- `make test-pkg` for testing the orchestration package
+
+## Execution Order
+1. Run formatting first: `make ruff-format`
+2. Run combined linting and type checking: `make lint-check-lib-main`, `make lint-check-lib-ds`, `make lint-check-pkg`
+3. Run tests: `make test-lib-main`, `make test-lib-ds`, `make test-pkg`

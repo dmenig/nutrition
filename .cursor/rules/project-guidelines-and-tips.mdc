@@ -1,7 +1,6 @@
 ---
-alwaysApply: false
+alwaysApply: true
 ---
-
 ## Nutrition Android App — Quick Context
 
 High-level notes to help an LLM (or a developer) locate things fast and build an APK without reading the whole codebase.
