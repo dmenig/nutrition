@@ -59,9 +59,7 @@ app.include_router(foods.router, prefix="", tags=["foods"])
 
 
 class PredictionService:
-    model: Any = None
     np_model: Any = None
-    model_path: str = "models/recurrent_model.pth"
     params_path: str = "models/best_params.json"
     npz_path: str = "models/recurrent_model_np.npz"
     normalization_stats: dict = {}  # Initialize normalization_stats
@@ -77,7 +75,7 @@ class PredictionService:
         return candidates[0]
 
     def load_model(self):
-        # Load normalization stats (used by both backends)
+        # Load normalization stats (used by the NumPy backend)
         try:
             params_path = self._resolve_first_existing(
                 [
@@ -91,83 +89,26 @@ class PredictionService:
                 self.normalization_stats = params.get("normalization", {})
         except Exception:
             self.normalization_stats = {}
-        # Backend selection
-        if self._should_use_numpy():
-            # Will lazily load weights in predict_* path
-            print("Prediction backend: NumPy")
-            return
-        # Torch backend (lazy import)
-        print("Prediction backend: Torch")
-        try:
-            import torch  # noqa: WPS433
-            from train_model import FinalModel  # noqa: WPS433
-        except Exception as e:  # pragma: no cover - environment dependent
-            raise RuntimeError(f"Torch backend requested but unavailable: {e}")
-        # Resolve model path
-        pth_candidates = [
-            self.model_path,
-            "/app/recurrent_model.pth",
-            "/app/models/recurrent_model.pth",
-        ]
-        pth_path = next((p for p in pth_candidates if os.path.exists(p)), None)
-        if pth_path is None:
-            raise RuntimeError("Torch .pth model not found")
-        # Infer architecture from state dict
-        sd = torch.load(pth_path, map_location="cpu")
-        hidden_size = int(sd["gru.weight_hh_l0"].shape[1])
-        num_layers = sum(1 for k in sd.keys() if k.startswith("gru.weight_ih_l")) or 1
-        input_size = 6  # calories, carbs, sugar, sel, alcool, water
-        model = FinalModel(
-            input_size,
-            initial_weight_guess=70.0,
-            hidden_size=hidden_size,
-            num_layers=num_layers,
-        )
-        model.load_state_dict(sd)
-        model.eval()
-        self.model = model
+        # We only support NumPy in server runtime
+        print("Prediction backend: NumPy")
+        return
 
     def _export_numpy_weights(self, npz_out_path: str) -> None:
         # NumPy-only deployment: exporting from Torch is disabled
         return
 
     def _should_use_numpy(self) -> bool:
-        """Return True if NumPy backend should be used based on env and file mtimes.
-
-        - PREDICT_BACKEND=torch forces Torch
-        - PREDICT_BACKEND=numpy forces NumPy (if file exists)
-        - Otherwise, prefer NumPy only if the .npz exists and is at least as new as the .pth
-        """
-        backend = os.environ.get("PREDICT_BACKEND", "auto").lower()
-        if backend == "torch":
-            return False
-        # Look in multiple locations commonly used in containers
+        """Return True when NumPy weights are present. Torch is not supported in server."""
         npz_candidates = [
             self.npz_path,
             "/app/recurrent_model_np.npz",
             "/app/models/recurrent_model_np.npz",
         ]
         existing_npz = next((p for p in npz_candidates if os.path.exists(p)), None)
-        if existing_npz is None:
-            return False
-        # Use the discovered path for subsequent loads
-        self.npz_path = existing_npz
-        if backend == "numpy":
+        if existing_npz is not None:
+            self.npz_path = existing_npz
             return True
-        # Compare mtimes: use numpy only if npz is >= pth
-        pth_candidates = [
-            self.model_path,
-            "/app/recurrent_model.pth",
-            "/app/models/recurrent_model.pth",
-        ]
-        pth_path = next((p for p in pth_candidates if os.path.exists(p)), None)
-        try:
-            if pth_path is not None:
-                return os.path.getmtime(self.npz_path) >= os.path.getmtime(pth_path)
-        except Exception:
-            pass
-        # If we cannot compare, default to NumPy since file exists
-        return True
+        return True  # still True; actual load will error clearly if file missing
 
     def _ensure_normalization_stats_loaded(self) -> None:
         """Load normalization stats from best_params.json if not already loaded.
@@ -297,78 +238,36 @@ class PredictionService:
         )
         norm_df["pds_normalized"] = norm_df["pds"] - weight_mean
 
-        use_numpy = (
-            self._should_use_numpy()
-            if backend is None
-            else (backend.lower() == "numpy")
+        # Enforce NumPy-only path
+        # NumPy path (lazy load)
+        if self.np_model is None:
+            from app.np_infer import load_numpy_weights, NumpyFinalModel  # noqa: WPS433
+
+            weights = load_numpy_weights(self.npz_path)
+            gru_w = weights.get("gru.weight_hh_l0")
+            head_w = weights.get("head.0.weight")
+            hidden_size = gru_w.shape[1]
+            input_size = head_w.shape[1] - hidden_size
+            num_layers = sum(
+                1 for k in weights.keys() if k.startswith("gru.weight_ih_l")
+            )
+            self.np_model = NumpyFinalModel(
+                weights, input_size, hidden_size, num_layers
+            )
+        obs_np = norm_df["pds_normalized"].values.astype("float32")[None, :]
+        nut_np = norm_df[nutrition_cols].values.astype("float32")[None, :, :]
+        sport_np = norm_df["sport"].values.astype("float32")[None, :]
+        base_metabolisms = self.np_model.forward(nut_np)
+        from app.np_infer import reconstruct_trajectory_numpy  # noqa: WPS433
+
+        predicted_observed_weight, w_adj_pred = reconstruct_trajectory_numpy(
+            obs_np,
+            base_metabolisms,
+            nut_np,
+            sport_np,
+            float(self.np_model.initial_adj_weight),
+            self.normalization_stats,
         )
-        if use_numpy:
-            # NumPy path (lazy load)
-            if self.np_model is None:
-                from app.np_infer import load_numpy_weights, NumpyFinalModel  # noqa: WPS433
-
-                weights = load_numpy_weights(self.npz_path)
-                gru_w = weights.get("gru.weight_hh_l0")
-                head_w = weights.get("head.0.weight")
-                hidden_size = gru_w.shape[1]
-                input_size = head_w.shape[1] - hidden_size
-                num_layers = sum(
-                    1 for k in weights.keys() if k.startswith("gru.weight_ih_l")
-                )
-                self.np_model = NumpyFinalModel(
-                    weights, input_size, hidden_size, num_layers
-                )
-            obs_np = norm_df["pds_normalized"].values.astype("float32")[None, :]
-            nut_np = norm_df[nutrition_cols].values.astype("float32")[None, :, :]
-            sport_np = norm_df["sport"].values.astype("float32")[None, :]
-            base_metabolisms = self.np_model.forward(nut_np)
-            from app.np_infer import reconstruct_trajectory_numpy  # noqa: WPS433
-
-            predicted_observed_weight, w_adj_pred = reconstruct_trajectory_numpy(
-                obs_np,
-                base_metabolisms,
-                nut_np,
-                sport_np,
-                float(self.np_model.initial_adj_weight),
-                self.normalization_stats,
-            )
-        else:
-            # Torch path
-            try:
-                import torch  # noqa: WPS433
-                from train_model import reconstruct_trajectory  # noqa: WPS433
-            except Exception as e:
-                raise HTTPException(
-                    status_code=503, detail=f"Torch backend unavailable: {e}"
-                )
-            weight_mean = float(
-                self.normalization_stats.get("pds", {}).get("mean", 0.0) or 0.0
-            )
-            observed_weights = torch.tensor(
-                (norm_df["pds_normalized"].values).astype("float32"),
-                dtype=torch.float32,
-            ).unsqueeze(0)
-            nutrition_data = torch.tensor(
-                norm_df[nutrition_cols].values.astype("float32"), dtype=torch.float32
-            ).unsqueeze(0)
-            sport_data = torch.tensor(
-                norm_df["sport"].values.astype("float32"), dtype=torch.float32
-            ).unsqueeze(0)
-            if self.model is None:
-                # Ensure loaded
-                self.load_model()
-            with torch.no_grad():
-                base_metabolisms_t = self.model(nutrition_data)
-                predicted_observed_weight_t, w_adj_pred_t = reconstruct_trajectory(
-                    observed_weights,
-                    base_metabolisms_t,
-                    nutrition_data,
-                    sport_data,
-                    self.model.initial_adj_weight,
-                    self.normalization_stats,
-                )
-            base_metabolisms = base_metabolisms_t.squeeze().cpu().numpy()
-            w_adj_pred = w_adj_pred_t.squeeze().cpu().numpy()
 
         # De-normalize outputs
         # Convert results to numpy uniformly
