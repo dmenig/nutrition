@@ -34,7 +34,11 @@ loss_weights.json
 sensitivity_analysis.png
 model_analysis_plots.png
 
+# Ignore top-level models directory, but allow app-bundled models to be tracked
 models/
+!app/models/
+!app/models/recurrent_model_np.npz
+!app/models/best_params.json
 
 # Android build outputs and caches
 android_app/java_pid1361541.hprof
