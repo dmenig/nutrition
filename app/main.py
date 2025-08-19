@@ -358,12 +358,7 @@ async def startup_event():
 
 @app.get("/api/v1/predict/latest", tags=["prediction"])
 async def get_latest_prediction(backend: str | None = None):
-    """Return latest model outputs.
-
-    - source=db (default): build features from DB aggregates
-    - source=csv: build features from training CSVs (parity with compare_backends)
-    - source=auto: same as db for this endpoint
-    """
+    """Return latest model outputs from DB-derived features only."""
     # Try serving DB-based predictions from cache if present
     try:
         with _PREDICT_CACHE_LOCK:
@@ -498,9 +493,7 @@ app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
 
 
 def get_plot_data(last_n: int | None = None, source: str | None = None):
-    # Construct plot data. By default we build strictly from the database.
-    # For local parity checks with the training pipeline (compare_backends.py),
-    # set env PLOTS_SOURCE=csv to source features from data/{processed_journal,variables}.csv
+    # Construct plot data strictly from the database.
     expected_cols = [
         "W_obs",
         "W_adj_pred",
@@ -629,118 +622,7 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
         finally:
             db.close()
 
-    def _build_from_training_csv() -> pd.DataFrame:
-        """Build features using the exact same CSV pipeline as compare_backends.py.
-
-        This path is useful for local validation and ensures parity with the
-        training data pipeline. It requires data/processed_journal.csv and
-        data/variables.csv to be present in the working directory (or container).
-        """
-        try:
-            from build_features import main as build_features_main  # lazy import
-        except Exception:
-            return pd.DataFrame(columns=["date"] + expected_cols)
-        # Resolve CSV presence from multiple roots or URLs
-        cand_roots = [
-            os.getcwd(),
-            "/app",
-            str(pathlib.Path(__file__).resolve().parents[1]),  # likely /.../src
-            str(pathlib.Path(__file__).resolve().parents[2]),  # repo root
-        ]
-        csv_journal: str | None = None
-        csv_variables: str | None = None
-        # 1) Environment-provided URLs take precedence
-        env_j = os.environ.get("CSV_URL_JOURNAL")
-        env_v = os.environ.get("CSV_URL_VARIABLES")
-        if env_j and env_v:
-            csv_journal, csv_variables = env_j, env_v
-        for root in cand_roots:
-            j = os.path.join(root, "data", "processed_journal.csv")
-            v = os.path.join(root, "data", "variables.csv")
-            if csv_journal and csv_variables:
-                break
-            if os.path.exists(j) and os.path.exists(v):
-                csv_journal, csv_variables = j, v
-                break
-        if not (csv_journal and csv_variables):
-            return pd.DataFrame(columns=["date"] + expected_cols)
-        try:
-            if csv_journal.startswith("http") or csv_variables.startswith("http"):
-                import tempfile, requests
-
-                with tempfile.TemporaryDirectory() as td:
-                    jp = os.path.join(td, "processed_journal.csv")
-                    vp = os.path.join(td, "variables.csv")
-                    rj = requests.get(csv_journal, timeout=30)
-                    rj.raise_for_status()
-                    with open(jp, "wb") as f:
-                        f.write(rj.content)
-                    rv = requests.get(csv_variables, timeout=30)
-                    rv.raise_for_status()
-                    with open(vp, "wb") as f:
-                        f.write(rv.content)
-                    features_df = build_features_main(
-                        journal_path=jp, variables_path=vp
-                    )
-            else:
-                features_df = build_features_main(
-                    journal_path=csv_journal, variables_path=csv_variables
-                )
-            # Ensure required columns exist and numeric
-            nutrition_cols = ["calories", "carbs", "sugar", "sel", "alcool", "water"]
-            for col in nutrition_cols + ["pds", "sport"]:
-                if col not in features_df.columns:
-                    features_df[col] = 0.0
-                features_df[col] = pd.to_numeric(
-                    features_df[col], errors="coerce"
-                ).fillna(0)
-            # Ensure a date column exists
-            df_feat = features_df.copy()
-            if "Date" in df_feat.columns:
-                # Some pipelines may keep a Date column
-                dt = pd.to_datetime(df_feat["Date"], errors="coerce")
-                df_feat = df_feat.assign(date=dt)
-            elif df_feat.index.name and str(df_feat.index.name).lower() == "date":
-                df_feat = df_feat.reset_index().rename(
-                    columns={df_feat.index.name: "date"}
-                )
-            elif df_feat.index.dtype_str.startswith("datetime"):
-                df_feat = df_feat.reset_index().rename(
-                    columns={df_feat.columns[0]: "date"}
-                )
-            else:
-                # Cannot establish timeline; bail out
-                return pd.DataFrame(columns=["date"] + expected_cols)
-            # Run model exactly like parity script
-            outputs = prediction_service.predict_from_features(
-                df_feat[
-                    [
-                        "date",
-                        "calories",
-                        "carbs",
-                        "sugar",
-                        "sel",
-                        "alcool",
-                        "water",
-                        "sport",
-                        "pds",
-                    ]
-                ].copy()
-            )
-            df = pd.DataFrame(
-                {
-                    "date": df_feat["date"],
-                    "W_obs": df_feat["pds"],
-                    "W_adj_pred": outputs.get("predicted_adjusted_weight", []),
-                    "M_base": outputs.get("base_metabolism_kcal", []),
-                    "calories": df_feat.get("calories", 0),
-                    "sport": df_feat.get("sport", 0),
-                }
-            )
-            return df
-        except Exception:
-            # If any issue, fall back to empty so other builders can try
-            return pd.DataFrame(columns=["date"] + expected_cols)
+    # CSV-based builders are intentionally removed in server runtime
 
     def _build_features_from_db() -> pd.DataFrame:
         """Build minimal features directly from DB for model usage (no CSV)."""
@@ -827,144 +709,70 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
         finally:
             db.close()
 
-    # Choose source according to env and availability
-    # PLOTS_SOURCE=csv -> use training CSV pipeline
-    # PLOTS_SOURCE=db  -> force DB path
-    # PLOTS_SOURCE=auto (default) -> try DB first, fall back to CSV, then summaries/on-the-fly
-    plots_source = (source or os.environ.get("PLOTS_SOURCE", "auto")).lower()
+    # Enforce DB-only source in server runtime. CSV paths are never used here.
     df = pd.DataFrame()
-    if plots_source == "csv":
-        # Explicit CSV parity
-        df = _build_from_training_csv()
-    elif plots_source == "db":
-        # Explicit DB-only
-        features_df = _build_features_from_db()
-        if features_df is not None and not features_df.empty:
+    features_df = _build_features_from_db()
+    if features_df is not None and not features_df.empty:
+        try:
+            outputs = prediction_service.predict_from_features(features_df)
+            # Seed prediction cache for DB source so /predict/latest is instant
             try:
-                outputs = prediction_service.predict_from_features(features_df)
-                # Seed prediction cache for DB source so /predict/latest is instant
-                try:
-                    with _PREDICT_CACHE_LOCK:
-                        _PREDICT_CACHE["db"] = {
-                            "outputs": outputs,
-                            "latest_idx": len(features_df) - 1,
-                            "ts": pd.Timestamp.utcnow().isoformat(),
-                        }
-                except Exception:
-                    pass
-                df = pd.DataFrame(
-                    {
-                        "date": features_df["date"],
-                        "W_obs": outputs.get("actual_weight", []),
-                        "W_adj_pred": outputs.get("predicted_adjusted_weight", []),
-                        "M_base": outputs.get("base_metabolism_kcal", []),
-                        "calories": features_df.get("calories", 0),
-                        "sport": features_df.get("sport", 0),
+                with _PREDICT_CACHE_LOCK:
+                    _PREDICT_CACHE["db"] = {
+                        "outputs": outputs,
+                        "latest_idx": len(features_df) - 1,
+                        "ts": pd.Timestamp.utcnow().isoformat(),
                     }
-                )
-                # Replace W_obs with true observed weights from DB when present (by date)
-                try:
-                    db_obs = SessionLocal()
-                    try:
-                        date_expr_w = func.coalesce(
-                            WeightLog.logged_date, func.date(WeightLog.logged_at)
-                        )
-                        w_rows = (
-                            db_obs.query(
-                                date_expr_w.label("date"),
-                                func.avg(WeightLog.weight_kg).label("W_obs"),
-                            )
-                            .group_by(date_expr_w)
-                            .all()
-                        )
-                        if w_rows:
-                            w_df = pd.DataFrame(
-                                [
-                                    {"date": r.date, "W_obs": float(r.W_obs or 0)}
-                                    for r in w_rows
-                                ]
-                            )
-                            df = df.merge(
-                                w_df, on="date", how="left", suffixes=("", "_db")
-                            )
-                            if "W_obs_db" in df.columns:
-                                df["W_obs"] = (
-                                    df["W_obs_db"]
-                                    .where(pd.notnull(df["W_obs_db"]), df["W_obs"])
-                                    .astype(float)
-                                )
-                                df.drop(columns=["W_obs_db"], inplace=True)
-                    finally:
-                        db_obs.close()
-                except Exception:
-                    pass
             except Exception:
-                df = pd.DataFrame()
-    else:
-        # Auto mode: prefer CSV parity when available, fall back to DB aggregates
-        df = _build_from_training_csv()
-        if df.empty:
-            features_df = _build_features_from_db()
-            if features_df is not None and not features_df.empty:
+                pass
+            df = pd.DataFrame(
+                {
+                    "date": features_df["date"],
+                    "W_obs": outputs.get("actual_weight", []),
+                    "W_adj_pred": outputs.get("predicted_adjusted_weight", []),
+                    "M_base": outputs.get("base_metabolism_kcal", []),
+                    "calories": features_df.get("calories", 0),
+                    "sport": features_df.get("sport", 0),
+                }
+            )
+            # Replace W_obs with true observed weights from DB when present (by date)
+            try:
+                db_obs = SessionLocal()
                 try:
-                    outputs = prediction_service.predict_from_features(features_df)
-                    # Seed prediction cache for DB source in auto mode as well
-                    try:
-                        with _PREDICT_CACHE_LOCK:
-                            _PREDICT_CACHE["db"] = {
-                                "outputs": outputs,
-                                "latest_idx": len(features_df) - 1,
-                                "ts": pd.Timestamp.utcnow().isoformat(),
-                            }
-                    except Exception:
-                        pass
-                    df = pd.DataFrame(
-                        {
-                            "date": features_df["date"],
-                            "W_obs": outputs.get("actual_weight", []),
-                            "W_adj_pred": outputs.get("predicted_adjusted_weight", []),
-                            "M_base": outputs.get("base_metabolism_kcal", []),
-                            "calories": features_df.get("calories", 0),
-                            "sport": features_df.get("sport", 0),
-                        }
+                    date_expr_w = func.coalesce(
+                        WeightLog.logged_date, func.date(WeightLog.logged_at)
                     )
-                    try:
-                        db_obs = SessionLocal()
-                        try:
-                            date_expr_w = func.coalesce(
-                                WeightLog.logged_date, func.date(WeightLog.logged_at)
+                    w_rows = (
+                        db_obs.query(
+                            date_expr_w.label("date"),
+                            func.avg(WeightLog.weight_kg).label("W_obs"),
+                        )
+                        .group_by(date_expr_w)
+                        .all()
+                    )
+                    if w_rows:
+                        w_df = pd.DataFrame(
+                            [
+                                {"date": r.date, "W_obs": float(r.W_obs or 0)}
+                                for r in w_rows
+                            ]
+                        )
+                        df = df.merge(
+                            w_df, on="date", how="left", suffixes=("", "_db")
+                        )
+                        if "W_obs_db" in df.columns:
+                            df["W_obs"] = (
+                                df["W_obs_db"]
+                                .where(pd.notnull(df["W_obs_db"]), df["W_obs"])
+                                .astype(float)
                             )
-                            w_rows = (
-                                db_obs.query(
-                                    date_expr_w.label("date"),
-                                    func.avg(WeightLog.weight_kg).label("W_obs"),
-                                )
-                                .group_by(date_expr_w)
-                                .all()
-                            )
-                            if w_rows:
-                                w_df = pd.DataFrame(
-                                    [
-                                        {"date": r.date, "W_obs": float(r.W_obs or 0)}
-                                        for r in w_rows
-                                    ]
-                                )
-                                df = df.merge(
-                                    w_df, on="date", how="left", suffixes=("", "_db")
-                                )
-                                if "W_obs_db" in df.columns:
-                                    df["W_obs"] = (
-                                        df["W_obs_db"]
-                                        .where(pd.notnull(df["W_obs_db"]), df["W_obs"])
-                                        .astype(float)
-                                    )
-                                    df.drop(columns=["W_obs_db"], inplace=True)
-                        finally:
-                            db_obs.close()
-                    except Exception:
-                        pass
-                except Exception:
-                    df = pd.DataFrame()
+                            df.drop(columns=["W_obs_db"], inplace=True)
+                finally:
+                    db_obs.close()
+            except Exception:
+                pass
+        except Exception:
+            df = pd.DataFrame()
     # As final safety nets
     if df.empty:
         df = _build_from_daily_summaries()
@@ -1074,9 +882,6 @@ def plots_debug():
         "db_sport_days": 0,
         "db_weight_days": 0,
         "db_weight_rows": 0,
-        "csv_app_data_exists": False,
-        "csv_repo_data_exists": False,
-        "csv_paths": {},
         "final_rows": 0,
         "final_cols": [],
     }
@@ -1113,33 +918,7 @@ def plots_debug():
         debug["final_cols"] = list(df_final.columns)
     except Exception as e:
         debug["final_error"] = str(e)
-    # File existence diagnostics for CSVs
-    try:
-        app_vars = pathlib.Path("/app/data/variables.csv")
-        app_journal = pathlib.Path("/app/data/processed_journal.csv")
-        repo_vars = (
-            pathlib.Path(__file__).resolve().parents[2] / "data" / "variables.csv"
-        )
-        repo_journal = (
-            pathlib.Path(__file__).resolve().parents[2]
-            / "data"
-            / "processed_journal.csv"
-        )
-        cwd_vars = pathlib.Path.cwd() / "data" / "variables.csv"
-        cwd_journal = pathlib.Path.cwd() / "data" / "processed_journal.csv"
-        debug["csv_paths"] = {
-            "app_vars": str(app_vars),
-            "app_journal": str(app_journal),
-            "repo_vars": str(repo_vars),
-            "repo_journal": str(repo_journal),
-            "cwd_vars": str(cwd_vars),
-            "cwd_journal": str(cwd_journal),
-        }
-        debug["csv_app_data_exists"] = app_vars.exists() and app_journal.exists()
-        debug["csv_repo_data_exists"] = repo_vars.exists() and repo_journal.exists()
-        debug["csv_cwd_data_exists"] = cwd_vars.exists() and cwd_journal.exists()
-    except Exception as e:
-        debug["csv_diag_error"] = str(e)
+    # CSV diagnostics removed in server runtime
     # Extra diagnostics for model/params presence and DL path
     try:
         debug["has_npz"] = os.path.exists(prediction_service.npz_path)
