@@ -376,3 +376,38 @@ def predict_parity(api_key: str = Depends(get_api_key)):
         "numpy": _summ(outs_numpy),
         "torch": _summ(outs_torch),
     }
+
+
+# ---- Prediction features preview (diagnostics) ----
+
+
+@router.get("/predict/features", status_code=status.HTTP_200_OK)
+def predict_features_preview(n: int = 10, api_key: str = Depends(get_api_key)):
+    """Return the last n rows of features used by the server for predictions.
+
+    Helps diagnose discrepancies between CSV and DB-derived features.
+    """
+    try:
+        from app.features.builder import build_prediction_features_from_db
+
+        df = build_prediction_features_from_db()
+        if df is None or df.empty:
+            return {"rows": 0}
+        tail = df.tail(max(1, int(n)))
+        # Ensure JSON-serializable columns only
+        cols = [
+            "date",
+            "calories",
+            "carbs",
+            "sugar",
+            "sel",
+            "alcool",
+            "water",
+            "sport",
+            "pds",
+        ]
+        cols = [c for c in cols if c in tail.columns]
+        data = {c: [float(v) if c != "date" else str(v) for v in tail[c].tolist()] for c in cols}
+        return {"rows": int(len(tail)), "features_tail": data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to build features: {e}")
