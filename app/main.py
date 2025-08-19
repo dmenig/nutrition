@@ -800,9 +800,79 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
         finally:
             db.close()
 
-    # Enforce DB-only source in server runtime. CSV paths are never used here.
+    def _build_prediction_features_df() -> pd.DataFrame:
+        """Build the full feature set used for predictions from the DB, scoped to dummy user."""
+        db = SessionLocal()
+        try:
+            # Build dates as in /predict/latest
+            date_expr_fl = func.coalesce(
+                FoodLog.logged_date, func.date(FoodLog.logged_at)
+            )
+            dummy_user = db.query(User).filter(User.email == "dummy@example.com").first()
+            dummy_user_id = getattr(dummy_user, "id", None)
+            food_rows = (
+                db.query(
+                    date_expr_fl.label("date"),
+                    func.coalesce(func.sum(FoodLog.calories), 0.0).label("calories"),
+                    func.coalesce(func.sum(FoodLog.carbs), 0.0).label("carbs"),
+                )
+            )
+            if dummy_user_id:
+                food_rows = food_rows.filter(FoodLog.user_id == dummy_user_id)
+            food_rows = food_rows.group_by(date_expr_fl).all()
+            date_expr_sa = func.coalesce(
+                SportActivity.logged_date, func.date(SportActivity.logged_at)
+            )
+            sport_rows = (
+                db.query(
+                    date_expr_sa.label("date"),
+                    func.coalesce(func.sum(SportActivity.calories_expended), 0.0).label(
+                        "sport"
+                    ),
+                )
+            )
+            if dummy_user_id:
+                sport_rows = sport_rows.filter(SportActivity.user_id == dummy_user_id)
+            sport_rows = sport_rows.group_by(date_expr_sa).all()
+            today_utc = datetime.utcnow().date()
+            dates = sorted(
+                d for d in ({r.date for r in food_rows} | {r.date for r in sport_rows}) if d < today_utc
+            )
+            food_by_date = {r.date: r for r in food_rows}
+            sport_by_date = {r.date: r for r in sport_rows}
+            date_expr_w = func.coalesce(WeightLog.logged_date, func.date(WeightLog.logged_at))
+            qw = db.query(
+                date_expr_w.label("date"), func.avg(WeightLog.weight_kg).label("weight")
+            )
+            if dummy_user_id:
+                qw = qw.filter(WeightLog.user_id == dummy_user_id)
+            weight_rows = qw.group_by(date_expr_w).all()
+            weight_by_date = {r.date: float(getattr(r, "weight", 0.0) or 0.0) for r in weight_rows}
+            extras_by_date = _compute_extra_nutrients_by_date(db, dates, dummy_user_id)
+            records: list[dict] = []
+            for d in dates:
+                fr = food_by_date.get(d)
+                sr = sport_by_date.get(d)
+                records.append(
+                    {
+                        "date": d,
+                        "calories": float(getattr(fr, "calories", 0.0) or 0.0),
+                        "carbs": float(getattr(fr, "carbs", 0.0) or 0.0),
+                        "sugar": float(extras_by_date.get(d, {}).get("sugar", 0.0)),
+                        "sel": float(extras_by_date.get(d, {}).get("sel", 0.0)),
+                        "alcool": float(extras_by_date.get(d, {}).get("alcool", 0.0)),
+                        "water": float(extras_by_date.get(d, {}).get("water", 0.0)),
+                        "sport": float(getattr(sr, "sport", 0.0) or 0.0),
+                        "pds": float(weight_by_date.get(d, 0.0) or 0.0),
+                    }
+                )
+            return pd.DataFrame(records)
+        finally:
+            db.close()
+
+    # Enforce DB-only source using the shared prediction feature builder.
     df = pd.DataFrame()
-    features_df = _build_features_from_db()
+    features_df = _build_prediction_features_df()
     if features_df is not None and not features_df.empty:
         try:
             outputs = prediction_service.predict_from_features(features_df)
