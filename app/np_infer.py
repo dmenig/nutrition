@@ -132,7 +132,10 @@ def reconstruct_trajectory_numpy(
     w_adj[:, 0] = start_weight
     for t in range(1, seq_len):
         weight_change = calories_delta[:, t - 1] / K_CAL_PER_KG
-        w_adj[:, t] = w_adj[:, t - 1] + weight_change
+        candidate = w_adj[:, t - 1] + weight_change
+        obs_norm = observed_weights[:, t]
+        # If an observed weight exists at this timestep (non-zero normalized), use it
+        w_adj[:, t] = np.where(obs_norm != 0.0, obs_norm, candidate)
 
     return w_adj, w_adj
 

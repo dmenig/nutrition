@@ -92,8 +92,10 @@ def reconstruct_trajectory(
     w_adj_pred_list = [start_weight.expand(batch_size)]
     for t in range(1, seq_len):
         weight_change = calories_delta[:, t - 1] / K_cal_kg
-        w_adj_t = w_adj_pred_list[t - 1] + weight_change
-        w_adj_pred_list.append(w_adj_t)
+        candidate = w_adj_pred_list[t - 1] + weight_change
+        # If an observed normalized weight exists at t, use it to anchor
+        anchored = torch.where(observed_weights[:, t] != 0.0, observed_weights[:, t], candidate)
+        w_adj_pred_list.append(anchored)
 
     w_adj_pred = torch.stack(w_adj_pred_list, dim=1)
     w_pred = w_adj_pred
