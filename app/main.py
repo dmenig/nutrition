@@ -84,7 +84,11 @@ class PredictionService:
                     "/app/best_params.json",
                     "/app/models/best_params.json",
                     os.path.join(os.getcwd(), "app", "models", "best_params.json"),
-                    os.path.join(pathlib.Path(__file__).resolve().parents[0], "models", "best_params.json"),
+                    os.path.join(
+                        pathlib.Path(__file__).resolve().parents[0],
+                        "models",
+                        "best_params.json",
+                    ),
                 ]
             )
             with open(params_path, "r") as f:
@@ -107,7 +111,11 @@ class PredictionService:
             "/app/recurrent_model_np.npz",
             "/app/models/recurrent_model_np.npz",
             os.path.join(os.getcwd(), "app", "models", "recurrent_model_np.npz"),
-            os.path.join(pathlib.Path(__file__).resolve().parents[0], "models", "recurrent_model_np.npz"),
+            os.path.join(
+                pathlib.Path(__file__).resolve().parents[0],
+                "models",
+                "recurrent_model_np.npz",
+            ),
         ]
         existing_npz = next((p for p in npz_candidates if os.path.exists(p)), None)
         if existing_npz is not None:
@@ -292,6 +300,8 @@ class PredictionService:
             "water_retention": water_retention.tolist(),
             "base_metabolism_kcal": base_metabolisms_kcal.tolist(),
         }
+
+
 @lru_cache(maxsize=1)
 def _load_variables_lookup() -> dict[str, dict[str, float]]:
     """Load variables.csv and return a mapping: food name -> per-100g nutrients.
@@ -301,7 +311,9 @@ def _load_variables_lookup() -> dict[str, dict[str, float]]:
     try:
         cand = [
             os.path.join("/app", "data", "variables.csv"),
-            os.path.join(pathlib.Path(__file__).resolve().parents[2], "data", "variables.csv"),
+            os.path.join(
+                pathlib.Path(__file__).resolve().parents[2], "data", "variables.csv"
+            ),
             os.path.join(os.getcwd(), "data", "variables.csv"),
         ]
         csv_path = next((p for p in cand if os.path.exists(p)), None)
@@ -328,6 +340,7 @@ def _load_variables_lookup() -> dict[str, dict[str, float]]:
     except Exception:
         return {}
 
+
 def _compute_extra_nutrients_by_date(db: Session, dates: list, user_id) -> dict:
     """Compute per-date nutrient sums using FoodLog.quantity and variables.csv.
 
@@ -336,18 +349,38 @@ def _compute_extra_nutrients_by_date(db: Session, dates: list, user_id) -> dict:
     lookup = _load_variables_lookup()
     if not lookup:
         return {
-            d: {"calories": 0.0, "carbs": 0.0, "sugar": 0.0, "sel": 0.0, "alcool": 0.0, "water": 0.0}
+            d: {
+                "calories": 0.0,
+                "carbs": 0.0,
+                "sugar": 0.0,
+                "sel": 0.0,
+                "alcool": 0.0,
+                "water": 0.0,
+            }
             for d in dates
         }
     by_date = {
-        d: {"calories": 0.0, "carbs": 0.0, "sugar": 0.0, "sel": 0.0, "alcool": 0.0, "water": 0.0}
+        d: {
+            "calories": 0.0,
+            "carbs": 0.0,
+            "sugar": 0.0,
+            "sel": 0.0,
+            "alcool": 0.0,
+            "water": 0.0,
+        }
         for d in dates
     }
     try:
-        q = db.query(FoodLog.food_name, FoodLog.quantity, func.coalesce(FoodLog.logged_date, func.date(FoodLog.logged_at)).label("d"))
+        q = db.query(
+            FoodLog.food_name,
+            FoodLog.quantity,
+            func.coalesce(FoodLog.logged_date, func.date(FoodLog.logged_at)).label("d"),
+        )
         if user_id:
             q = q.filter(FoodLog.user_id == user_id)
-        q = q.filter(func.coalesce(FoodLog.logged_date, func.date(FoodLog.logged_at)).in_(dates))
+        q = q.filter(
+            func.coalesce(FoodLog.logged_date, func.date(FoodLog.logged_at)).in_(dates)
+        )
         for name, qty_g, d in q.all():
             try:
                 per100 = lookup.get(str(name), None)
@@ -368,7 +401,6 @@ def _compute_extra_nutrients_by_date(db: Session, dates: list, user_id) -> dict:
     except Exception:
         pass
     return by_date
-
 
 
 @app.get("/api/v1/health")
@@ -456,19 +488,18 @@ async def get_latest_prediction(backend: str | None = None):
             return {
                 "latest": {
                     "actual_weight": outputs["actual_weight"][latest_idx],
-                    "predicted_adjusted_weight": outputs[
-                        "predicted_adjusted_weight"
-                    ][latest_idx],
-                    "water_retention": outputs["water_retention"][latest_idx],
-                    "base_metabolism_kcal": outputs["base_metabolism_kcal"][
+                    "predicted_adjusted_weight": outputs["predicted_adjusted_weight"][
                         latest_idx
                     ],
+                    "water_retention": outputs["water_retention"][latest_idx],
+                    "base_metabolism_kcal": outputs["base_metabolism_kcal"][latest_idx],
                 },
                 "series": outputs,
             }
     except Exception:
         pass
-        features_df = _build_prediction_features_df()
+    # Build features using the shared DB pipeline used by plots
+    features_df = build_prediction_features_from_db()
     outputs = prediction_service.predict_from_features(features_df, backend=backend)
     # Populate cache for future requests
     try:
@@ -576,11 +607,15 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
         db = SessionLocal()
         try:
             # collect all distinct dates for dummy user only (if present)
-            dummy_user = db.query(User).filter(User.email == "dummy@example.com").first()
+            dummy_user = (
+                db.query(User).filter(User.email == "dummy@example.com").first()
+            )
             dummy_user_id = getattr(dummy_user, "id", None)
             q_fd = db.query(FoodLog.logged_date).distinct()
             q_sd = db.query(SportActivity.logged_date).distinct()
-            q_wd = db.query(func.coalesce(WeightLog.logged_date, func.date(WeightLog.logged_at))).distinct()
+            q_wd = db.query(
+                func.coalesce(WeightLog.logged_date, func.date(WeightLog.logged_at))
+            ).distinct()
             if dummy_user_id:
                 q_fd = q_fd.filter(FoodLog.user_id == dummy_user_id)
                 q_sd = q_sd.filter(SportActivity.user_id == dummy_user_id)
@@ -649,7 +684,9 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
             date_expr_fl = func.coalesce(
                 FoodLog.logged_date, func.date(FoodLog.logged_at)
             )
-            dummy_user = db.query(User).filter(User.email == "dummy@example.com").first()
+            dummy_user = (
+                db.query(User).filter(User.email == "dummy@example.com").first()
+            )
             dummy_user_id = getattr(dummy_user, "id", None)
             q_food = db.query(
                 date_expr_fl.label("date"),
@@ -695,14 +732,18 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
             food_by_date = {r.date: r for r in food_rows}
             sport_by_date = {r.date: r for r in sport_rows}
             # Fetch observed weights per day and map by date
-            date_expr_w = func.coalesce(WeightLog.logged_date, func.date(WeightLog.logged_at))
+            date_expr_w = func.coalesce(
+                WeightLog.logged_date, func.date(WeightLog.logged_at)
+            )
             qw = db.query(
                 date_expr_w.label("date"), func.avg(WeightLog.weight_kg).label("weight")
             )
             if dummy_user_id:
                 qw = qw.filter(WeightLog.user_id == dummy_user_id)
             weight_rows = qw.group_by(date_expr_w).all()
-            weight_by_date = {r.date: float(getattr(r, "weight", 0.0) or 0.0) for r in weight_rows}
+            weight_by_date = {
+                r.date: float(getattr(r, "weight", 0.0) or 0.0) for r in weight_rows
+            }
             records: list[dict] = []
             for d in dates:
                 fr = food_by_date.get(d)
@@ -735,7 +776,9 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
             # Load variables.csv
             var_candidates = [
                 os.path.join("/app", "data", "variables.csv"),
-                os.path.join(pathlib.Path(__file__).resolve().parents[2], "data", "variables.csv"),
+                os.path.join(
+                    pathlib.Path(__file__).resolve().parents[2], "data", "variables.csv"
+                ),
                 os.path.join(os.getcwd(), "data", "variables.csv"),
             ]
             var_path = next((p for p in var_candidates if os.path.exists(p)), None)
@@ -749,15 +792,7 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
             merged = feats_df.reset_index().merge(df_rec, on="Date", how="left")
             merged = merged.rename(columns={"Pds": "pds"})
             # Overwrite with DB totals
-            for col in ["calories", "carbs", "sugar", "sel", "alcool", "water", "sport", "pds"]:
-                if col == "sport":
-                    merged[col] = pd.to_numeric(merged.get("sport", merged.get("Sport", 0)), errors="coerce").fillna(0)
-                elif col == "pds":
-                    merged[col] = pd.to_numeric(merged.get("pds", merged.get("Pds", 0)), errors="coerce").fillna(0)
-                else:
-                    merged[col] = pd.to_numeric(merged[col], errors="coerce").fillna(0)
-            return merged[[
-                "Date",
+            for col in [
                 "calories",
                 "carbs",
                 "sugar",
@@ -766,7 +801,34 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
                 "water",
                 "sport",
                 "pds",
-            ]].rename(columns={"Date": "date"}).copy()
+            ]:
+                if col == "sport":
+                    merged[col] = pd.to_numeric(
+                        merged.get("sport", merged.get("Sport", 0)), errors="coerce"
+                    ).fillna(0)
+                elif col == "pds":
+                    merged[col] = pd.to_numeric(
+                        merged.get("pds", merged.get("Pds", 0)), errors="coerce"
+                    ).fillna(0)
+                else:
+                    merged[col] = pd.to_numeric(merged[col], errors="coerce").fillna(0)
+            return (
+                merged[
+                    [
+                        "Date",
+                        "calories",
+                        "carbs",
+                        "sugar",
+                        "sel",
+                        "alcool",
+                        "water",
+                        "sport",
+                        "pds",
+                    ]
+                ]
+                .rename(columns={"Date": "date"})
+                .copy()
+            )
         finally:
             db.close()
 
@@ -778,41 +840,49 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
             date_expr_fl = func.coalesce(
                 FoodLog.logged_date, func.date(FoodLog.logged_at)
             )
-            dummy_user = db.query(User).filter(User.email == "dummy@example.com").first()
+            dummy_user = (
+                db.query(User).filter(User.email == "dummy@example.com").first()
+            )
             dummy_user_id = getattr(dummy_user, "id", None)
             # We'll derive nutrition strictly from variables.csv; keep a distinct list of dates from FoodLog
             food_dates = db.query(date_expr_fl.label("date"))
             if dummy_user_id:
                 food_dates = food_dates.filter(FoodLog.user_id == dummy_user_id)
-            food_rows = [(r.date, 0.0, 0.0) for r in food_dates.group_by(date_expr_fl).all()]
+            food_rows = [
+                (r.date, 0.0, 0.0) for r in food_dates.group_by(date_expr_fl).all()
+            ]
             date_expr_sa = func.coalesce(
                 SportActivity.logged_date, func.date(SportActivity.logged_at)
             )
-            sport_rows = (
-                db.query(
-                    date_expr_sa.label("date"),
-                    func.coalesce(func.sum(SportActivity.calories_expended), 0.0).label(
-                        "sport"
-                    ),
-                )
+            sport_rows = db.query(
+                date_expr_sa.label("date"),
+                func.coalesce(func.sum(SportActivity.calories_expended), 0.0).label(
+                    "sport"
+                ),
             )
             if dummy_user_id:
                 sport_rows = sport_rows.filter(SportActivity.user_id == dummy_user_id)
             sport_rows = sport_rows.group_by(date_expr_sa).all()
             today_utc = datetime.utcnow().date()
             dates = sorted(
-                d for d in ({r.date for r in food_rows} | {r.date for r in sport_rows}) if d < today_utc
+                d
+                for d in ({r.date for r in food_rows} | {r.date for r in sport_rows})
+                if d < today_utc
             )
             food_by_date = {r[0]: r for r in food_rows}
             sport_by_date = {r.date: r for r in sport_rows}
-            date_expr_w = func.coalesce(WeightLog.logged_date, func.date(WeightLog.logged_at))
+            date_expr_w = func.coalesce(
+                WeightLog.logged_date, func.date(WeightLog.logged_at)
+            )
             qw = db.query(
                 date_expr_w.label("date"), func.avg(WeightLog.weight_kg).label("weight")
             )
             if dummy_user_id:
                 qw = qw.filter(WeightLog.user_id == dummy_user_id)
             weight_rows = qw.group_by(date_expr_w).all()
-            weight_by_date = {r.date: float(getattr(r, "weight", 0.0) or 0.0) for r in weight_rows}
+            weight_by_date = {
+                r.date: float(getattr(r, "weight", 0.0) or 0.0) for r in weight_rows
+            }
             extras_by_date = _compute_extra_nutrients_by_date(db, dates, dummy_user_id)
             records: list[dict] = []
             for d in dates:
@@ -821,7 +891,9 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
                 records.append(
                     {
                         "date": d,
-                        "calories": float(extras_by_date.get(d, {}).get("calories", 0.0)),
+                        "calories": float(
+                            extras_by_date.get(d, {}).get("calories", 0.0)
+                        ),
                         "carbs": float(extras_by_date.get(d, {}).get("carbs", 0.0)),
                         "sugar": float(extras_by_date.get(d, {}).get("sugar", 0.0)),
                         "sel": float(extras_by_date.get(d, {}).get("sel", 0.0)),
@@ -883,9 +955,7 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
                                 for r in w_rows
                             ]
                         )
-                        df = df.merge(
-                            w_df, on="date", how="left", suffixes=("", "_db")
-                        )
+                        df = df.merge(w_df, on="date", how="left", suffixes=("", "_db"))
                         if "W_obs_db" in df.columns:
                             df["W_obs"] = (
                                 df["W_obs_db"]
@@ -1061,7 +1131,9 @@ def plots_debug():
             if head0 is not None:
                 import numpy as _np
 
-                debug["model_head0_sum"] = float(_np.asarray(head0, dtype=_np.float64).sum())
+                debug["model_head0_sum"] = float(
+                    _np.asarray(head0, dtype=_np.float64).sum()
+                )
                 debug["model_head0_shape"] = list(head0.shape)
             if gru is not None:
                 debug["model_gru_shape"] = list(gru.shape)
