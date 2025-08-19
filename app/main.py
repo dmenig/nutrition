@@ -225,7 +225,8 @@ class PredictionService:
         # which can drive the GRU to unrealistic regimes and explode weights.
         # To preserve training-time distribution, replace all-zero placeholder columns
         # with their normalization means so their normalized values are exactly 0.
-        for missing_col in ["sugar", "sel", "alcool", "water"]:
+        # Apply to the full nutrition set, including calories and carbs.
+        for missing_col in ["calories", "carbs", "sugar", "sel", "alcool", "water"]:
             if missing_col in features_df.columns:
                 col_series = features_df[missing_col]
                 try:
