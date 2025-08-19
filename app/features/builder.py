@@ -9,47 +9,21 @@ import pandas as pd
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.db.models import FoodLog, SportActivity, User, WeightLog
+from app.db.models import FoodLog, SportActivity, User, WeightLog, Food
 
 
 @lru_cache(maxsize=1)
 def load_variables_lookup() -> Dict[str, Dict[str, float]]:
-    """Load variables.csv and return per-100g nutrient map by food name (original CSV name).
-
-    Keys include: 'Calories / 100g', 'Carbs', 'Sugar', 'Sel', 'Alcool', 'Water'.
-    """
-    candidates = [
-        os.path.join("/app", "data", "variables.csv"),
-        os.path.join(pathlib.Path(__file__).resolve().parents[2], "data", "variables.csv"),
-        os.path.join(os.getcwd(), "data", "variables.csv"),
-    ]
-    # Only use variables.csv locally; on Render we should rely on DB values populated from CSVs.
-    csv_path = next((p for p in candidates if os.path.exists(p)), None)
-    if not csv_path:
-        return {}
-    df = pd.read_csv(csv_path)
-    lookup: Dict[str, Dict[str, float]] = {}
-    for _, row in df.iterrows():
-        name = str(row.get("Nom", "")).strip()
-        if not name:
-            continue
-        lookup[name] = {
-            "Calories / 100g": float(row.get("Calories / 100g", 0.0) or 0.0),
-            "Carbs": float(row.get("Carbs", 0.0) or 0.0),
-            "Sugar": float(row.get("Sugar", 0.0) or 0.0),
-            "Sel": float(row.get("Sel", 0.0) or 0.0),
-            "Alcool": float(row.get("Alcool", 0.0) or 0.0),
-            "Water": float(row.get("Water", 0.0) or 0.0),
-        }
-    return lookup
+    """Deprecated: CSV lookups are not used in server runtime. Returns empty dict."""
+    return {}
 
 
 def compute_nutrients_by_date(db: Session, dates: List, user_id) -> Dict:
-    """Compute per-date nutrient sums using FoodLog.quantity join with variables.csv.
+    """Compute per-date nutrient sums using only the database.
 
-    Returns a mapping: date -> {calories, carbs, sugar, sel, alcool, water}
+    - calories, carbs: sum directly from FoodLog columns (already absolute values)
+    - sugar, sel, alcool, water: join to Food by name and scale by quantity/100
     """
-    lookup = load_variables_lookup()
     base = {
         "calories": 0.0,
         "carbs": 0.0,
@@ -62,25 +36,35 @@ def compute_nutrients_by_date(db: Session, dates: List, user_id) -> Dict:
     if not dates:
         return by_date
 
-    # If variables lookup is missing (e.g., container path not mounted),
-    # fall back to DB aggregates for calories/carbs so the model has signal.
-    if not lookup:
-        q = db.query(
-            func.coalesce(FoodLog.logged_date, func.date(FoodLog.logged_at)).label("d"),
+    dcol = func.coalesce(FoodLog.logged_date, func.date(FoodLog.logged_at))
+    q = (
+        db.query(
+            dcol.label("d"),
             func.coalesce(func.sum(FoodLog.calories), 0.0).label("calories"),
             func.coalesce(func.sum(FoodLog.carbs), 0.0).label("carbs"),
+            # Scale per-100g nutrient columns by quantity (grams)
+            func.coalesce(func.sum((Food.sugar * (FoodLog.quantity / 100.0))), 0.0).label("sugar"),
+            func.coalesce(func.sum((Food.sel * (FoodLog.quantity / 100.0))), 0.0).label("sel"),
+            func.coalesce(func.sum((Food.alcool * (FoodLog.quantity / 100.0))), 0.0).label("alcool"),
+            func.coalesce(func.sum((Food.water * (FoodLog.quantity / 100.0))), 0.0).label("water"),
         )
-        if user_id:
-            q = q.filter(FoodLog.user_id == user_id)
-        q = q.filter(func.coalesce(FoodLog.logged_date, func.date(FoodLog.logged_at)).in_(dates))
-        q = q.group_by("d").all()
-        for r in q:
-            acc = by_date.get(r.d)
-            if acc is None:
-                continue
-            acc["calories"] = float(getattr(r, "calories", 0.0) or 0.0)
-            acc["carbs"] = float(getattr(r, "carbs", 0.0) or 0.0)
-        return by_date
+        .outerjoin(Food, Food.name == FoodLog.food_name)
+    )
+    if user_id:
+        q = q.filter(FoodLog.user_id == user_id)
+    q = q.filter(dcol.in_(dates))
+    q = q.group_by("d").all()
+    for r in q:
+        acc = by_date.get(r.d)
+        if acc is None:
+            continue
+        acc["calories"] = float(getattr(r, "calories", 0.0) or 0.0)
+        acc["carbs"] = float(getattr(r, "carbs", 0.0) or 0.0)
+        acc["sugar"] = float(getattr(r, "sugar", 0.0) or 0.0)
+        acc["sel"] = float(getattr(r, "sel", 0.0) or 0.0)
+        acc["alcool"] = float(getattr(r, "alcool", 0.0) or 0.0)
+        acc["water"] = float(getattr(r, "water", 0.0) or 0.0)
+    return by_date
     q = db.query(
         FoodLog.food_name,
         FoodLog.quantity,
