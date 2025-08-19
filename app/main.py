@@ -43,8 +43,7 @@ from sqlalchemy import func
 from datetime import datetime, timezone, timedelta
 from app.services.summary import upsert_daily_summary
 from functools import lru_cache
-from build_features import build_features_from_dfs
-from data_processor import load_and_process_data_from_dfs
+from app.features.builder import build_prediction_features_from_db
 
 Base.metadata.create_all(bind=engine)
 
@@ -838,7 +837,7 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
 
     # Enforce DB-only source using the shared prediction feature builder.
     df = pd.DataFrame()
-    features_df = _build_prediction_features_df()
+    features_df = build_prediction_features_from_db()
     if features_df is not None and not features_df.empty:
         try:
             outputs = prediction_service.predict_from_features(features_df)
