@@ -316,6 +316,8 @@ def _load_variables_lookup() -> dict[str, dict[str, float]]:
                 if not name:
                     continue
                 lookup[name] = {
+                    "Calories / 100g": float(row.get("Calories / 100g", 0.0) or 0.0),
+                    "Carbs": float(row.get("Carbs", 0.0) or 0.0),
                     "Sugar": float(row.get("Sugar", 0.0) or 0.0),
                     "Sel": float(row.get("Sel", 0.0) or 0.0),
                     "Alcool": float(row.get("Alcool", 0.0) or 0.0),
@@ -328,14 +330,20 @@ def _load_variables_lookup() -> dict[str, dict[str, float]]:
         return {}
 
 def _compute_extra_nutrients_by_date(db: Session, dates: list, user_id) -> dict:
-    """Compute per-date sums for Sugar/Sel/Alcool/Water using FoodLog.quantity and variables.csv.
+    """Compute per-date nutrient sums using FoodLog.quantity and variables.csv.
 
-    Returns mapping: date -> {"sugar": x, "sel": y, "alcool": z, "water": w}
+    Returns mapping: date -> {"calories","carbs","sugar","sel","alcool","water"}
     """
     lookup = _load_variables_lookup()
     if not lookup:
-        return {d: {"sugar": 0.0, "sel": 0.0, "alcool": 0.0, "water": 0.0} for d in dates}
-    by_date = {d: {"sugar": 0.0, "sel": 0.0, "alcool": 0.0, "water": 0.0} for d in dates}
+        return {
+            d: {"calories": 0.0, "carbs": 0.0, "sugar": 0.0, "sel": 0.0, "alcool": 0.0, "water": 0.0}
+            for d in dates
+        }
+    by_date = {
+        d: {"calories": 0.0, "carbs": 0.0, "sugar": 0.0, "sel": 0.0, "alcool": 0.0, "water": 0.0}
+        for d in dates
+    }
     try:
         q = db.query(FoodLog.food_name, FoodLog.quantity, func.coalesce(FoodLog.logged_date, func.date(FoodLog.logged_at)).label("d"))
         if user_id:
@@ -350,6 +358,8 @@ def _compute_extra_nutrients_by_date(db: Session, dates: list, user_id) -> dict:
                 cur = by_date.get(d)
                 if cur is None:
                     continue
+                cur["calories"] += per100["Calories / 100g"] * scale
+                cur["carbs"] += per100["Carbs"] * scale
                 cur["sugar"] += per100["Sugar"] * scale
                 cur["sel"] += per100["Sel"] * scale
                 cur["alcool"] += per100["Alcool"] * scale
@@ -771,16 +781,11 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
             )
             dummy_user = db.query(User).filter(User.email == "dummy@example.com").first()
             dummy_user_id = getattr(dummy_user, "id", None)
-            food_rows = (
-                db.query(
-                    date_expr_fl.label("date"),
-                    func.coalesce(func.sum(FoodLog.calories), 0.0).label("calories"),
-                    func.coalesce(func.sum(FoodLog.carbs), 0.0).label("carbs"),
-                )
-            )
+            # We'll derive nutrition strictly from variables.csv; keep a distinct list of dates from FoodLog
+            food_dates = db.query(date_expr_fl.label("date"))
             if dummy_user_id:
-                food_rows = food_rows.filter(FoodLog.user_id == dummy_user_id)
-            food_rows = food_rows.group_by(date_expr_fl).all()
+                food_dates = food_dates.filter(FoodLog.user_id == dummy_user_id)
+            food_rows = [(r.date, 0.0, 0.0) for r in food_dates.group_by(date_expr_fl).all()]
             date_expr_sa = func.coalesce(
                 SportActivity.logged_date, func.date(SportActivity.logged_at)
             )
@@ -799,7 +804,7 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
             dates = sorted(
                 d for d in ({r.date for r in food_rows} | {r.date for r in sport_rows}) if d < today_utc
             )
-            food_by_date = {r.date: r for r in food_rows}
+            food_by_date = {r[0]: r for r in food_rows}
             sport_by_date = {r.date: r for r in sport_rows}
             date_expr_w = func.coalesce(WeightLog.logged_date, func.date(WeightLog.logged_at))
             qw = db.query(
@@ -817,8 +822,8 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
                 records.append(
                     {
                         "date": d,
-                        "calories": float(getattr(fr, "calories", 0.0) or 0.0),
-                        "carbs": float(getattr(fr, "carbs", 0.0) or 0.0),
+                        "calories": float(extras_by_date.get(d, {}).get("calories", 0.0)),
+                        "carbs": float(extras_by_date.get(d, {}).get("carbs", 0.0)),
                         "sugar": float(extras_by_date.get(d, {}).get("sugar", 0.0)),
                         "sel": float(extras_by_date.get(d, {}).get("sel", 0.0)),
                         "alcool": float(extras_by_date.get(d, {}).get("alcool", 0.0)),
