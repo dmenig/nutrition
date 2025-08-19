@@ -925,6 +925,22 @@ def plots_debug():
         debug["has_params"] = os.path.exists(
             prediction_service.params_path
         ) or os.path.exists("/app/models/best_params.json")
+        # Model fingerprint (helps verify deployed weights)
+        try:
+            from app.np_infer import load_numpy_weights as _load_npz
+
+            weights = _load_npz(prediction_service.npz_path)
+            head0 = weights.get("head.0.weight")
+            gru = weights.get("gru.weight_hh_l0")
+            if head0 is not None:
+                import numpy as _np
+
+                debug["model_head0_sum"] = float(_np.asarray(head0, dtype=_np.float64).sum())
+                debug["model_head0_shape"] = list(head0.shape)
+            if gru is not None:
+                debug["model_gru_shape"] = list(gru.shape)
+        except Exception as _e:
+            debug["model_fp_error"] = str(_e)
         # Build a tiny features DF like /predict/latest uses
         db = SessionLocal()
         try:
