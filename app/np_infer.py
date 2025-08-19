@@ -94,7 +94,8 @@ class NumpyFinalModel:
             current_nutrition = nutrition_data[0, t, :]  # [input]
             combined = np.concatenate([current_gru_out, current_nutrition], axis=0)
             h = _relu(combined @ W0.T + b0)
-            inc = np.tanh(h @ W2.T + b2)[0] * 0.125
+            # Match Torch model: tanh head scaled to max 0.2 (~200 kcal/day)
+            inc = np.tanh(h @ W2.T + b2)[0] * 0.2
             current_metabolism = current_metabolism + float(inc)
             base_metabolisms.append([current_metabolism])
 
