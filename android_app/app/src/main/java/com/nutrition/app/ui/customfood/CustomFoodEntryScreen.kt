@@ -10,7 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.nutrition.app.data.model.CustomFood
+import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -83,20 +83,14 @@ fun CustomFoodEntryScreen(
             Spacer(modifier = Modifier.height(16.dp))
             Button(
                 onClick = {
-                    val newFood = CustomFood(
-                        name = name,
-                        caloriesPer100g = calories.toDoubleOrNull() ?: 0.0,
-                        proteinPer100g = protein.toDoubleOrNull() ?: 0.0,
-                        carbohydratesPer100g = carbohydrates.toDoubleOrNull() ?: 0.0,
-                        fatPer100g = fat.toDoubleOrNull() ?: 0.0
-                    )
-                    viewModel.addCustomFood(newFood)
-                    onBackClick()
+                    val cals = calories.toFloatOrNull() ?: 0f
+                    val prot = protein.toFloatOrNull()
+                    val carbsVal = carbohydrates.toFloatOrNull()
+                    val fatVal = fat.toFloatOrNull()
+                    viewModel.createFood(name, cals, prot, carbsVal, fatVal) { onBackClick() }
                 },
                 modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Add Food")
-            }
+            ) { Text("Add Food to Database") }
         }
     }
 }

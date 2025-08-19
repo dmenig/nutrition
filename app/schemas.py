@@ -149,3 +149,11 @@ class FoodOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class FoodCreate(BaseModel):
+    name: str
+    calories: float
+    protein: Optional[float] = None
+    carbs: Optional[float] = None
+    fat: Optional[float] = None

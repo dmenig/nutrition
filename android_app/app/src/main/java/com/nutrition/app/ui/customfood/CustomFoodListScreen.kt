@@ -9,12 +9,17 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.nutrition.app.data.model.CustomFood
+import com.nutrition.app.data.remote.model.BackendFood
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -22,7 +27,12 @@ fun CustomFoodListScreen(
     onAddFoodClick: () -> Unit,
     viewModel: CustomFoodViewModel = hiltViewModel()
 ) {
-    val customFoods by viewModel.customFoods.collectAsState()
+    val foods by viewModel.foods.collectAsState()
+    var query by remember { mutableStateOf("") }
+    // Prompt user to search (backend requires min length 1)
+    LaunchedEffect(query) {
+        if (query.isNotBlank()) viewModel.refresh(query)
+    }
 
     Scaffold(
         topBar = {
@@ -34,22 +44,39 @@ fun CustomFoodListScreen(
             }
         }
     ) { paddingValues ->
-        if (customFoods.isEmpty()) {
+        Column(
+            modifier = Modifier
+                .padding(paddingValues)
+                .fillMaxSize()
+                .padding(16.dp)
+        ) {
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                label = { Text("Search foods") },
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+
+            if (foods.isEmpty()) {
             Text(
-                text = "No custom foods added yet. Click the '+' button to add one.",
+                text = if (query.isBlank()) "Type to search foods to edit" else "No foods found",
                 modifier = Modifier
-                    .padding(paddingValues)
                     .fillMaxSize()
                     .wrapContentSize()
             )
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .padding(paddingValues)
-                    .fillMaxSize()
-            ) {
-                items(customFoods) { food ->
-                    CustomFoodItem(food = food, onDeleteClick = { viewModel.deleteCustomFood(it) })
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                ) {
+                    items(foods) { food ->
+                        CustomFoodItem(food = food, onDeleteClick = {
+                            viewModel.deleteFood(food.id)
+                            // refresh after delete
+                            if (query.isNotBlank()) viewModel.refresh(query)
+                        })
+                    }
                 }
             }
         }
@@ -57,7 +84,7 @@ fun CustomFoodListScreen(
 }
 
 @Composable
-fun CustomFoodItem(food: CustomFood, onDeleteClick: (CustomFood) -> Unit) {
+fun CustomFoodItem(food: BackendFood, onDeleteClick: (BackendFood) -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -73,10 +100,10 @@ fun CustomFoodItem(food: CustomFood, onDeleteClick: (CustomFood) -> Unit) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(text = food.name, style = MaterialTheme.typography.titleMedium)
                 Spacer(modifier = Modifier.height(4.dp))
-                Text(text = "Calories: ${food.caloriesPer100g}kcal", style = MaterialTheme.typography.bodySmall)
-                Text(text = "Protein: ${food.proteinPer100g}g", style = MaterialTheme.typography.bodySmall)
-                Text(text = "Carbs: ${food.carbohydratesPer100g}g", style = MaterialTheme.typography.bodySmall)
-                Text(text = "Fat: ${food.fatPer100g}g", style = MaterialTheme.typography.bodySmall)
+                Text(text = "Calories: ${food.calories}kcal", style = MaterialTheme.typography.bodySmall)
+                Text(text = "Protein: ${food.protein ?: 0f}g", style = MaterialTheme.typography.bodySmall)
+                Text(text = "Carbs: ${food.carbs ?: 0f}g", style = MaterialTheme.typography.bodySmall)
+                Text(text = "Fat: ${food.fat ?: 0f}g", style = MaterialTheme.typography.bodySmall)
             }
             IconButton(onClick = { onDeleteClick(food) }) {
                 Icon(Icons.Filled.Delete, "Delete custom food")

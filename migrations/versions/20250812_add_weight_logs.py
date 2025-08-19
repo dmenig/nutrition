@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = '20250812_add_weight_logs'
-down_revision: Union[str, Sequence[str], None] = '20250811_add_logged_date_columns'
+down_revision: Union[str, Sequence[str], None] = '20250811_add_logged_date_cols'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

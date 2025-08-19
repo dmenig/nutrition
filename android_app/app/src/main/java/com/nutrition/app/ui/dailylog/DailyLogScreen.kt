@@ -47,7 +47,8 @@ fun DailyLogScreen(
     onSportLogClick: (SportActivity) -> Unit = {},
     onNavigateToFoodEntry: () -> Unit = {},
     onNavigateToSportEntry: () -> Unit = {},
-    onNavigateToPlots: () -> Unit = {}
+    onNavigateToPlots: () -> Unit = {},
+    onNavigateToCustomFoods: () -> Unit = {}
 ) {
     val selectedDate by viewModel.selectedDate.collectAsState()
     val dailySummary by viewModel.dailySummary.collectAsState()
@@ -63,6 +64,7 @@ fun DailyLogScreen(
                 title = { Text("Daily Log") },
                 actions = {
                     TextButton(onClick = onNavigateToPlots) { Text("Plots") }
+                    TextButton(onClick = onNavigateToCustomFoods) { Text("Custom Foods") }
                 }
             )
         }

@@ -104,7 +104,8 @@ fun NutritionApp() {
                 },
                 onNavigateToFoodEntry = { navController.navigate("food_entry_route") },
                 onNavigateToSportEntry = { navController.navigate("sport_entry_route") },
-                onNavigateToPlots = { navController.navigate("plots") }
+                onNavigateToPlots = { navController.navigate("plots") },
+                onNavigateToCustomFoods = { navController.navigate("custom_food_list") }
             )
         }
         composable("plots") {
