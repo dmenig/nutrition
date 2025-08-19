@@ -42,6 +42,7 @@ import pathlib
 from sqlalchemy import func
 from datetime import datetime, timezone, timedelta
 from app.services.summary import upsert_daily_summary
+from functools import lru_cache
 
 Base.metadata.create_all(bind=engine)
 
@@ -290,6 +291,73 @@ class PredictionService:
             "water_retention": water_retention.tolist(),
             "base_metabolism_kcal": base_metabolisms_kcal.tolist(),
         }
+@lru_cache(maxsize=1)
+def _load_variables_lookup() -> dict[str, dict[str, float]]:
+    """Load variables.csv and return a mapping: food name -> per-100g nutrients.
+
+    Keys: 'Sugar', 'Sel', 'Alcool', 'Water'. Missing values default to 0.0.
+    """
+    try:
+        cand = [
+            os.path.join("/app", "data", "variables.csv"),
+            os.path.join(pathlib.Path(__file__).resolve().parents[2], "data", "variables.csv"),
+            os.path.join(os.getcwd(), "data", "variables.csv"),
+        ]
+        csv_path = next((p for p in cand if os.path.exists(p)), None)
+        if not csv_path:
+            return {}
+        df = pd.read_csv(csv_path)
+        lookup: dict[str, dict[str, float]] = {}
+        for _, row in df.iterrows():
+            try:
+                name = str(row.get("Nom", "")).strip()
+                if not name:
+                    continue
+                lookup[name] = {
+                    "Sugar": float(row.get("Sugar", 0.0) or 0.0),
+                    "Sel": float(row.get("Sel", 0.0) or 0.0),
+                    "Alcool": float(row.get("Alcool", 0.0) or 0.0),
+                    "Water": float(row.get("Water", 0.0) or 0.0),
+                }
+            except Exception:
+                continue
+        return lookup
+    except Exception:
+        return {}
+
+def _compute_extra_nutrients_by_date(db: Session, dates: list, user_id) -> dict:
+    """Compute per-date sums for Sugar/Sel/Alcool/Water using FoodLog.quantity and variables.csv.
+
+    Returns mapping: date -> {"sugar": x, "sel": y, "alcool": z, "water": w}
+    """
+    lookup = _load_variables_lookup()
+    if not lookup:
+        return {d: {"sugar": 0.0, "sel": 0.0, "alcool": 0.0, "water": 0.0} for d in dates}
+    by_date = {d: {"sugar": 0.0, "sel": 0.0, "alcool": 0.0, "water": 0.0} for d in dates}
+    try:
+        q = db.query(FoodLog.food_name, FoodLog.quantity, func.coalesce(FoodLog.logged_date, func.date(FoodLog.logged_at)).label("d"))
+        if user_id:
+            q = q.filter(FoodLog.user_id == user_id)
+        q = q.filter(func.coalesce(FoodLog.logged_date, func.date(FoodLog.logged_at)).in_(dates))
+        for name, qty_g, d in q.all():
+            try:
+                per100 = lookup.get(str(name), None)
+                if not per100:
+                    continue
+                scale = float(qty_g or 0.0) / 100.0
+                cur = by_date.get(d)
+                if cur is None:
+                    continue
+                cur["sugar"] += per100["Sugar"] * scale
+                cur["sel"] += per100["Sel"] * scale
+                cur["alcool"] += per100["Alcool"] * scale
+                cur["water"] += per100["Water"] * scale
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return by_date
+
 
 
 @app.get("/api/v1/health")
@@ -394,7 +462,7 @@ async def get_latest_prediction(backend: str | None = None):
             # Scope to the dummy public user to ensure parity with local CSV
             dummy_user = db.query(User).filter(User.email == "dummy@example.com").first()
             dummy_user_id = getattr(dummy_user, "id", None)
-            # Aggregate minimal features per day from DB
+            # Aggregate features per day from DB (scoped to dummy user if present)
             date_expr_fl = func.coalesce(
                 FoodLog.logged_date, func.date(FoodLog.logged_at)
             )
@@ -446,6 +514,8 @@ async def get_latest_prediction(backend: str | None = None):
             )
         food_by_date = {r.date: r for r in food_rows}
         sport_by_date = {r.date: r for r in sport_rows}
+        # Compute extra nutrients from variables.csv joined on food_name and quantity
+        extras_by_date = _compute_extra_nutrients_by_date(db, dates, dummy_user_id)
         # Include observed weights per date to anchor predictions
         date_expr_w = func.coalesce(WeightLog.logged_date, func.date(WeightLog.logged_at))
         wq = db.query(
@@ -465,10 +535,10 @@ async def get_latest_prediction(backend: str | None = None):
                     "date": d,
                     "calories": float(getattr(fr, "calories", 0.0) or 0.0),
                     "carbs": float(getattr(fr, "carbs", 0.0) or 0.0),
-                    "sugar": 0.0,
-                    "sel": 0.0,
-                    "alcool": 0.0,
-                    "water": 0.0,
+                    "sugar": float(extras_by_date.get(d, {}).get("sugar", 0.0)),
+                    "sel": float(extras_by_date.get(d, {}).get("sel", 0.0)),
+                    "alcool": float(extras_by_date.get(d, {}).get("alcool", 0.0)),
+                    "water": float(extras_by_date.get(d, {}).get("water", 0.0)),
                     "sport": float(getattr(sr, "sport", 0.0) or 0.0),
                     "pds": float(weight_by_date.get(d, 0.0) or 0.0),
                 }
