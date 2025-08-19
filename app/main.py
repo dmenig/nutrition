@@ -43,6 +43,8 @@ from sqlalchemy import func
 from datetime import datetime, timezone, timedelta
 from app.services.summary import upsert_daily_summary
 from functools import lru_cache
+from build_features import build_features_from_dfs
+from data_processor import load_and_process_data_from_dfs
 
 Base.metadata.create_all(bind=engine)
 
@@ -710,7 +712,52 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
                         "pds": float(weight_by_date.get(d, 0.0) or 0.0),
                     }
                 )
-            return pd.DataFrame(records)
+            # Build DataFrames like the CSV pipeline expects
+            journal_df = pd.DataFrame(
+                {
+                    "Date": dates,
+                    "Pds": [weight_by_date.get(d, 0.0) for d in dates],
+                    # Leave formula empty; we'll overwrite nutrient totals after processing
+                    "Nourriture": ["" for _ in dates],
+                    # Sport formulas empty; we'll overwrite sport totals
+                    "Sport": ["" for _ in dates],
+                }
+            )
+            # Load variables.csv
+            var_candidates = [
+                os.path.join("/app", "data", "variables.csv"),
+                os.path.join(pathlib.Path(__file__).resolve().parents[2], "data", "variables.csv"),
+                os.path.join(os.getcwd(), "data", "variables.csv"),
+            ]
+            var_path = next((p for p in var_candidates if os.path.exists(p)), None)
+            variables_df = pd.read_csv(var_path) if var_path else pd.DataFrame()
+            # Run the same pipeline functions as CSV (DF adapter)
+            feats_df = load_and_process_data_from_dfs(journal_df, variables_df)
+            feats_df = build_features_from_dfs(journal_df, variables_df)
+            # Merge DB-derived totals and return exact model columns
+            df_rec = pd.DataFrame(records)
+            df_rec = df_rec.rename(columns={"date": "Date"})
+            merged = feats_df.reset_index().merge(df_rec, on="Date", how="left")
+            merged = merged.rename(columns={"Pds": "pds"})
+            # Overwrite with DB totals
+            for col in ["calories", "carbs", "sugar", "sel", "alcool", "water", "sport", "pds"]:
+                if col == "sport":
+                    merged[col] = pd.to_numeric(merged.get("sport", merged.get("Sport", 0)), errors="coerce").fillna(0)
+                elif col == "pds":
+                    merged[col] = pd.to_numeric(merged.get("pds", merged.get("Pds", 0)), errors="coerce").fillna(0)
+                else:
+                    merged[col] = pd.to_numeric(merged[col], errors="coerce").fillna(0)
+            return merged[[
+                "Date",
+                "calories",
+                "carbs",
+                "sugar",
+                "sel",
+                "alcool",
+                "water",
+                "sport",
+                "pds",
+            ]].rename(columns={"Date": "date"}).copy()
         finally:
             db.close()
 

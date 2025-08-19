@@ -65,6 +65,17 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def build_features_from_dfs(journal_df: pd.DataFrame, variables_df: pd.DataFrame) -> pd.DataFrame:
+    """Run the same pipeline but on provided DataFrames (DB-adapted)."""
+    from data_processor import load_and_process_data_from_dfs
+
+    print("--- Starting Data Processing (DF adapter) ---")
+    features_df = load_and_process_data_from_dfs(journal_df, variables_df)
+    features_df = build_features(features_df)
+    print("--- Feature Building Complete (DF adapter) ---")
+    return features_df
+
+
 def main(journal_path: str, variables_path: str):
     """
     Orchestrates the data processing to build features.

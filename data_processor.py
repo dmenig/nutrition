@@ -89,3 +89,61 @@ def load_and_process_data(
     features_df.sort_index(inplace=True)
 
     return features_df
+
+
+def load_and_process_data_from_dfs(journal_df: pd.DataFrame, variables_df: pd.DataFrame) -> pd.DataFrame:
+    """Same as load_and_process_data, but accepts preloaded DataFrames.
+
+    Expects journal_df with columns: 'Date', 'Pds', 'Sport', 'Nourriture'.
+    variables_df is the same as loaded from variables.csv.
+    """
+    jd = journal_df.copy()
+    vd = variables_df.copy()
+    jd["Date"] = pd.to_datetime(jd["Date"])
+    jd.set_index("Date", inplace=True)
+    jd.sort_index(inplace=True)
+
+    # Create a mapping from original to normalized food names
+    food_name_mapping = {
+        row["Nom"]: normalize_food_names(row["Nom"])
+        for _, row in vd.iterrows()
+    }
+
+    # Identify all nutrients available in the variables file (excluding 'Nom')
+    all_nutrients = [
+        col for col in vd.columns if col != "Nom" and not str(col).startswith("Unnamed")
+    ]
+
+    # Pre-load all nutrient contexts to avoid re-reading variables.csv in loop
+    nutrient_contexts = {
+        nutrient: get_nutrient_context(nutrient, vd) for nutrient in all_nutrients
+    }
+
+    daily_nutrients_data = []
+    for date, row in jd.iterrows():
+        daily_data = {"Date": date, "Pds": row.get("Pds", 0.0), "Sport": row.get("Sport", "")}
+        food_formula = str(row.get("Nourriture", "")) if pd.notna(row.get("Nourriture", "")) else ""
+
+        # Normalize food names within the formula
+        for original_name, normalized_name in food_name_mapping.items():
+            food_formula = re.sub(
+                r"\b" + re.escape(original_name) + r"\b",
+                normalized_name,
+                food_formula,
+                flags=re.IGNORECASE,
+            )
+
+        for nutrient in all_nutrients:
+            if food_formula:
+                calculated_value = calculate_nutrient_from_formula_with_context(
+                    food_formula, nutrient_contexts[nutrient]
+                )
+            else:
+                calculated_value = 0
+            daily_data[nutrient] = calculated_value
+        daily_nutrients_data.append(daily_data)
+
+    features_df = pd.DataFrame(daily_nutrients_data)
+    features_df.set_index("Date", inplace=True)
+    features_df.sort_index(inplace=True)
+    return features_df
