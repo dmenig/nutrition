@@ -688,6 +688,17 @@ async def get_latest_prediction(source: str | None = None, backend: str | None =
             )
         food_by_date = {r.date: r for r in food_rows}
         sport_by_date = {r.date: r for r in sport_rows}
+        # Include observed weights per date to anchor predictions
+        date_expr_w = func.coalesce(WeightLog.logged_date, func.date(WeightLog.logged_at))
+        weight_rows = (
+            db.query(
+                date_expr_w.label("date"), func.avg(WeightLog.weight_kg).label("weight")
+            )
+            .group_by(date_expr_w)
+            .all()
+        )
+        weight_by_date = {r.date: float(getattr(r, "weight", 0.0) or 0.0) for r in weight_rows}
+
         records: list[dict] = []
         for d in dates:
             fr = food_by_date.get(d)
@@ -702,8 +713,7 @@ async def get_latest_prediction(source: str | None = None, backend: str | None =
                     "alcool": 0.0,
                     "water": 0.0,
                     "sport": float(getattr(sr, "sport", 0.0) or 0.0),
-                    # Observed weights unknown in DB; set to 0 for model reconstruction
-                    "pds": 0.0,
+                    "pds": float(weight_by_date.get(d, 0.0) or 0.0),
                 }
             )
         features_df = pd.DataFrame(records)
@@ -1039,6 +1049,16 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
                 )  # empty
             food_by_date = {r.date: r for r in food_rows}
             sport_by_date = {r.date: r for r in sport_rows}
+            # Fetch observed weights per day and map by date
+            date_expr_w = func.coalesce(WeightLog.logged_date, func.date(WeightLog.logged_at))
+            weight_rows = (
+                db.query(
+                    date_expr_w.label("date"), func.avg(WeightLog.weight_kg).label("weight")
+                )
+                .group_by(date_expr_w)
+                .all()
+            )
+            weight_by_date = {r.date: float(getattr(r, "weight", 0.0) or 0.0) for r in weight_rows}
             records: list[dict] = []
             for d in dates:
                 fr = food_by_date.get(d)
@@ -1053,8 +1073,8 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
                         "alcool": 0.0,
                         "water": 0.0,
                         "sport": float(getattr(sr, "sport", 0.0) or 0.0),
-                        # Observed weight unknown in DB; use 0 to allow model to run
-                        "pds": 0.0,
+                        # Use observed average weight for that date when available
+                        "pds": float(weight_by_date.get(d, 0.0) or 0.0),
                     }
                 )
             return pd.DataFrame(records)

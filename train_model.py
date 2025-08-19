@@ -85,7 +85,11 @@ def reconstruct_trajectory(
     )
 
     # Calculate the predicted weight trajectory from the model's outputs
-    w_adj_pred_list = [initial_adj_weight.expand(batch_size)]
+    # Anchor: if observed weight is provided at t=0 (after de-norm), start from it
+    pds_mean = normalization_stats.get("pds", {}).get("mean", 0.0)
+    first_obs_abs = observed_weights[:, 0] + pds_mean
+    start_weight = torch.where(first_obs_abs > 0.0, first_obs_abs, initial_adj_weight)
+    w_adj_pred_list = [start_weight.expand(batch_size)]
     for t in range(1, seq_len):
         weight_change = calories_delta[:, t - 1] / K_cal_kg
         w_adj_t = w_adj_pred_list[t - 1] + weight_change

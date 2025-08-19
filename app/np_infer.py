@@ -121,8 +121,12 @@ def reconstruct_trajectory_numpy(
 
     calories_delta = calories_in_unnorm - sport_unnorm - base_metabolisms.squeeze(-1) * 1000.0
 
+    # Anchor the trajectory: if an observed weight exists at t=0 (non-zero after de-norm), use it
+    weight_mean = float(normalization_stats.get("pds", {}).get("mean", 0.0) or 0.0)
+    first_obs_abs = float(observed_weights[0, 0] + weight_mean)
+    start_weight = first_obs_abs if first_obs_abs > 0.0 else float(initial_adj_weight)
     w_adj = np.zeros((1, seq_len), dtype=np.float32)
-    w_adj[:, 0] = float(initial_adj_weight)
+    w_adj[:, 0] = start_weight
     for t in range(1, seq_len):
         weight_change = calories_delta[:, t - 1] / K_CAL_PER_KG
         w_adj[:, t] = w_adj[:, t - 1] + weight_change
