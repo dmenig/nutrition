@@ -78,10 +78,12 @@ def reconstruct_trajectory(
         sport_data.squeeze(-1) * sport_stats["std"] + sport_stats["mean"]
     )
 
+    base_thousands = base_metabolisms.squeeze(-1)
+    base_thousands_clamped = torch.clamp(base_thousands, min=1.5, max=3.5)
     calories_delta = (
         calories_in_unnormalized
         - sport_data_unnormalized
-        - base_metabolisms.squeeze(-1) * 1000
+        - base_thousands_clamped * 1000
     )
 
     # Calculate the predicted weight trajectory from the model's outputs

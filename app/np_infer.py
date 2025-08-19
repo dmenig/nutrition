@@ -119,7 +119,11 @@ def reconstruct_trajectory_numpy(
     calories_in_unnorm = nutrition_data[:, :, 0] * cal_stats["std"] + cal_stats["mean"]
     sport_unnorm = sport_data * sport_stats["std"] + sport_stats["mean"]
 
-    calories_delta = calories_in_unnorm - sport_unnorm - base_metabolisms.squeeze(-1) * 1000.0
+    # Clamp base metabolism to a physiologically plausible range (in thousands of kcal/day)
+    base_thousands = base_metabolisms.squeeze(-1)
+    base_thousands_clamped = np.clip(base_thousands, 1.5, 3.5)
+
+    calories_delta = calories_in_unnorm - sport_unnorm - base_thousands_clamped * 1000.0
 
     # Anchor the trajectory using normalized observed weight at t=0 when available
     first_obs_norm = float(observed_weights[0, 0])
