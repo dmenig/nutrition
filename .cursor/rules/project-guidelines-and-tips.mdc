@@ -292,3 +292,6 @@ This repo includes scripts and data to fill the production database with food de
   - We enable `pool_pre_ping=True` and `pool_recycle=300` in `app/db/database.py` to avoid stale connections.
 - Alembic config notes:
   - `migrations/env.py` uses `settings.DATABASE_URL`. Ensure it points to Neon when running migrations locally. If you previously had Alembic trying `localhost`/`db`, update `.env` or export `DATABASE_URL` to Neon, then rerun `alembic upgrade head`.
+
+
+We don't want any fallbacks on this project. If a feature doesn't work, we need to make it fail, and then solve the bug.
