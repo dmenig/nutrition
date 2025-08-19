@@ -156,7 +156,7 @@ object AppModule {
     @Named("NutritionApi")
     fun provideRetrofit(okHttpClient: OkHttpClient, gson: Gson): Retrofit {
         return Retrofit.Builder()
-            .baseUrl("https://nutrition-tbdo.onrender.com/")
+            .baseUrl("http://10.0.2.2:8000/")
             .client(okHttpClient)
             .addConverterFactory(GsonConverterFactory.create(gson))
             .build()
