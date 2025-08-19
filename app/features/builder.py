@@ -19,6 +19,7 @@ def load_variables_lookup() -> Dict[str, Dict[str, float]]:
     Keys include: 'Calories / 100g', 'Carbs', 'Sugar', 'Sel', 'Alcool', 'Water'.
     """
     candidates = [
+        os.path.join("/app", "data", "variables.csv"),
         os.path.join(pathlib.Path(__file__).resolve().parents[2], "data", "variables.csv"),
         os.path.join(os.getcwd(), "data", "variables.csv"),
     ]
@@ -58,7 +59,27 @@ def compute_nutrients_by_date(db: Session, dates: List, user_id) -> Dict:
         "water": 0.0,
     }
     by_date = {d: dict(base) for d in dates}
-    if not lookup or not dates:
+    if not dates:
+        return by_date
+
+    # If variables lookup is missing (e.g., container path not mounted),
+    # fall back to DB aggregates for calories/carbs so the model has signal.
+    if not lookup:
+        q = db.query(
+            func.coalesce(FoodLog.logged_date, func.date(FoodLog.logged_at)).label("d"),
+            func.coalesce(func.sum(FoodLog.calories), 0.0).label("calories"),
+            func.coalesce(func.sum(FoodLog.carbs), 0.0).label("carbs"),
+        )
+        if user_id:
+            q = q.filter(FoodLog.user_id == user_id)
+        q = q.filter(func.coalesce(FoodLog.logged_date, func.date(FoodLog.logged_at)).in_(dates))
+        q = q.group_by("d").all()
+        for r in q:
+            acc = by_date.get(r.d)
+            if acc is None:
+                continue
+            acc["calories"] = float(getattr(r, "calories", 0.0) or 0.0)
+            acc["carbs"] = float(getattr(r, "carbs", 0.0) or 0.0)
         return by_date
     q = db.query(
         FoodLog.food_name,
