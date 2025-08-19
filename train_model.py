@@ -87,15 +87,15 @@ def reconstruct_trajectory(
     )
 
     # Calculate the predicted weight trajectory from the model's outputs
-    # Anchor: use normalized observed weight at t=0 when present; otherwise initial guess
-    start_weight = torch.where(observed_weights[:, 0] != 0.0, observed_weights[:, 0], initial_adj_weight)
+    # Anchor only at t=0 (if available); subsequent steps free-run like the NumPy path
+    start_weight = torch.where(
+        observed_weights[:, 0] != 0.0, observed_weights[:, 0], initial_adj_weight
+    )
     w_adj_pred_list = [start_weight.expand(batch_size)]
     for t in range(1, seq_len):
         weight_change = calories_delta[:, t - 1] / K_cal_kg
-        candidate = w_adj_pred_list[t - 1] + weight_change
-        # If an observed normalized weight exists at t, use it to anchor
-        anchored = torch.where(observed_weights[:, t] != 0.0, observed_weights[:, t], candidate)
-        w_adj_pred_list.append(anchored)
+        next_w = w_adj_pred_list[t - 1] + weight_change
+        w_adj_pred_list.append(next_w)
 
     w_adj_pred = torch.stack(w_adj_pred_list, dim=1)
     w_pred = w_adj_pred

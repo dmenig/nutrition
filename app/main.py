@@ -357,192 +357,39 @@ async def startup_event():
 
 
 @app.get("/api/v1/predict/latest", tags=["prediction"])
-async def get_latest_prediction(source: str | None = None, backend: str | None = None):
+async def get_latest_prediction(backend: str | None = None):
     """Return latest model outputs.
 
     - source=db (default): build features from DB aggregates
     - source=csv: build features from training CSVs (parity with compare_backends)
     - source=auto: same as db for this endpoint
     """
-    src_key = (source or "db").lower()
-    if src_key == "csv":
-        # Return from cache if available
-        try:
-            with _PREDICT_CACHE_LOCK:
-                cached = _PREDICT_CACHE.get(src_key)
-            if cached is not None and isinstance(cached.get("outputs"), dict):
-                outputs = cached["outputs"]
-                latest_idx = int(
-                    cached.get(
-                        "latest_idx", len(outputs.get("base_metabolism_kcal", [])) - 1
-                    )
+    # Try serving DB-based predictions from cache if present
+    try:
+        with _PREDICT_CACHE_LOCK:
+            cached = _PREDICT_CACHE.get("db")
+        if cached is not None and isinstance(cached.get("outputs"), dict):
+            outputs = cached["outputs"]
+            latest_idx = int(
+                cached.get(
+                    "latest_idx", len(outputs.get("base_metabolism_kcal", [])) - 1
                 )
-                return {
-                    "latest": {
-                        "actual_weight": outputs["actual_weight"][latest_idx],
-                        "predicted_adjusted_weight": outputs[
-                            "predicted_adjusted_weight"
-                        ][latest_idx],
-                        "water_retention": outputs["water_retention"][latest_idx],
-                        "base_metabolism_kcal": outputs["base_metabolism_kcal"][
-                            latest_idx
-                        ],
-                    },
-                    "series": outputs,
-                }
-        except Exception:
-            pass
-        try:
-            from build_features import main as build_features_main
-        except Exception as e:
-            raise HTTPException(
-                status_code=503, detail=f"CSV features unavailable: {e}"
             )
-        # Resolve CSVs from common locations or URLs
-        cand_roots = [
-            os.getcwd(),
-            "/app",
-            str(pathlib.Path(__file__).resolve().parents[1]),  # likely /.../src
-            str(pathlib.Path(__file__).resolve().parents[2]),  # repo root
-        ]
-        csv_journal: str | None = None
-        csv_variables: str | None = None
-        # 1) Environment-provided URLs take precedence
-        env_j = os.environ.get("CSV_URL_JOURNAL")
-        env_v = os.environ.get("CSV_URL_VARIABLES")
-        if env_j and env_v:
-            csv_journal, csv_variables = env_j, env_v
-        # 2) Local files in known roots
-        for root in cand_roots:
-            j = os.path.join(root, "data", "processed_journal.csv")
-            v = os.path.join(root, "data", "variables.csv")
-            if csv_journal and csv_variables:
-                break
-            if os.path.exists(j) and os.path.exists(v):
-                csv_journal, csv_variables = j, v
-                break
-        if not (csv_journal and csv_variables):
-            raise HTTPException(
-                status_code=503,
-                detail="CSV features missing (checked env URLs, cwd, /app, repo roots)",
-            )
-        try:
-            # If URLs provided, download to temp files to satisfy data_processor's os.path.exists checks
-            if csv_journal.startswith("http") or csv_variables.startswith("http"):
-                import tempfile, requests
-
-                with tempfile.TemporaryDirectory() as td:
-                    jp = os.path.join(td, "processed_journal.csv")
-                    vp = os.path.join(td, "variables.csv")
-                    rj = requests.get(csv_journal, timeout=30)
-                    rj.raise_for_status()
-                    with open(jp, "wb") as f:
-                        f.write(rj.content)
-                    rv = requests.get(csv_variables, timeout=30)
-                    rv.raise_for_status()
-                    with open(vp, "wb") as f:
-                        f.write(rv.content)
-                    raw_df = build_features_main(journal_path=jp, variables_path=vp)
-            else:
-                # Prefer a precomputed features CSV if present to avoid heavy recomputation on small instances
-                try:
-                    feat_csv = None
-                    for root in [
-                        os.getcwd(),
-                        "/app",
-                        str(pathlib.Path(__file__).resolve().parents[1]),
-                        str(pathlib.Path(__file__).resolve().parents[2]),
-                    ]:
-                        candidate = os.path.join(root, "data", "features.csv")
-                        if os.path.exists(candidate):
-                            feat_csv = candidate
-                            break
-                    if feat_csv is not None:
-                        raw_df = pd.read_csv(feat_csv)
-                    else:
-                        raw_df = build_features_main(
-                            journal_path=csv_journal, variables_path=csv_variables
-                        )
-                except Exception:
-                    raw_df = build_features_main(
-                        journal_path=csv_journal, variables_path=csv_variables
-                    )
-        except Exception as e:
-            raise HTTPException(
-                status_code=500, detail=f"Failed to build CSV features: {e}"
-            )
-        df_feat = raw_df.copy()
-        if "Date" in df_feat.columns:
-            dt = pd.to_datetime(df_feat["Date"], errors="coerce")
-            df_feat = df_feat.assign(date=dt)
-        elif df_feat.index.dtype_str.startswith("datetime"):
-            df_feat = df_feat.reset_index().rename(columns={df_feat.columns[0]: "date"})
-        else:
-            raise HTTPException(
-                status_code=500, detail="CSV features missing Date index/column"
-            )
-        for col in [
-            "calories",
-            "carbs",
-            "sugar",
-            "sel",
-            "alcool",
-            "water",
-            "sport",
-            "pds",
-        ]:
-            if col not in df_feat.columns:
-                df_feat[col] = 0.0
-            df_feat[col] = pd.to_numeric(df_feat[col], errors="coerce").fillna(0)
-        features_df = df_feat[
-            [
-                "date",
-                "calories",
-                "carbs",
-                "sugar",
-                "sel",
-                "alcool",
-                "water",
-                "sport",
-                "pds",
-            ]
-        ]
-        # Cache inputs to speed subsequent requests
-        try:
-            with _PREDICT_CACHE_LOCK:
-                _PREDICT_CACHE[src_key] = {
-                    "features_df_head": features_df.head(1).to_dict(),
-                    "ts": pd.Timestamp.utcnow().isoformat(),
-                }
-        except Exception:
-            pass
-    else:
-        # Try serving DB-based predictions from cache if present
-        try:
-            with _PREDICT_CACHE_LOCK:
-                cached = _PREDICT_CACHE.get(src_key)
-            if cached is not None and isinstance(cached.get("outputs"), dict):
-                outputs = cached["outputs"]
-                latest_idx = int(
-                    cached.get(
-                        "latest_idx", len(outputs.get("base_metabolism_kcal", [])) - 1
-                    )
-                )
-                return {
-                    "latest": {
-                        "actual_weight": outputs["actual_weight"][latest_idx],
-                        "predicted_adjusted_weight": outputs[
-                            "predicted_adjusted_weight"
-                        ][latest_idx],
-                        "water_retention": outputs["water_retention"][latest_idx],
-                        "base_metabolism_kcal": outputs["base_metabolism_kcal"][
-                            latest_idx
-                        ],
-                    },
-                    "series": outputs,
-                }
-        except Exception:
-            pass
+            return {
+                "latest": {
+                    "actual_weight": outputs["actual_weight"][latest_idx],
+                    "predicted_adjusted_weight": outputs[
+                        "predicted_adjusted_weight"
+                    ][latest_idx],
+                    "water_retention": outputs["water_retention"][latest_idx],
+                    "base_metabolism_kcal": outputs["base_metabolism_kcal"][
+                        latest_idx
+                    ],
+                },
+                "series": outputs,
+            }
+    except Exception:
+        pass
         db = SessionLocal()
         try:
             # Aggregate minimal features per day from DB
@@ -620,7 +467,7 @@ async def get_latest_prediction(source: str | None = None, backend: str | None =
     # Populate cache for future requests
     try:
         with _PREDICT_CACHE_LOCK:
-            _PREDICT_CACHE[src_key] = {
+            _PREDICT_CACHE["db"] = {
                 "outputs": outputs,
                 "latest_idx": len(features_df) - 1,
                 "ts": pd.Timestamp.utcnow().isoformat(),
@@ -1392,8 +1239,8 @@ def plots_debug():
 
 
 @app.get("/api/v1/plots/weight", response_model=WeightPlotResponse, tags=["plots"])
-def get_weight_plot_data(days: int | None = None, source: str | None = None):
-    df = get_plot_data(last_n=days, source=source)
+def get_weight_plot_data(days: int | None = None):
+    df = get_plot_data(last_n=days)
 
     # Enforce presence of observed weights; no fallback
     # Only include observed weights that are non-null and non-zero
@@ -1413,8 +1260,8 @@ def get_weight_plot_data(days: int | None = None, source: str | None = None):
 @app.get(
     "/api/v1/plots/metabolism", response_model=MetabolismPlotResponse, tags=["plots"]
 )
-def get_metabolism_plot_data(days: int | None = None, source: str | None = None):
-    df = get_plot_data(last_n=days, source=source)
+def get_metabolism_plot_data(days: int | None = None):
+    df = get_plot_data(last_n=days)
     m_values = [float(v) for v in df["M_base"].tolist() if pd.notnull(v)]
     # If metabolism is a flat placeholder at 2500 across all points, return empty to allow client fallback
     m_series: list[dict] = []
