@@ -391,12 +391,20 @@ async def get_latest_prediction(backend: str | None = None):
         pass
         db = SessionLocal()
         try:
+            # Scope to the dummy public user to ensure parity with local CSV
+            dummy_user = db.query(User).filter(User.email == "dummy@example.com").first()
+            dummy_user_id = getattr(dummy_user, "id", None)
             # Aggregate minimal features per day from DB
             date_expr_fl = func.coalesce(
                 FoodLog.logged_date, func.date(FoodLog.logged_at)
             )
             food_rows = (
                 db.query(
+                    date_expr_fl.label("date"),
+                    func.coalesce(func.sum(FoodLog.calories), 0.0).label("calories"),
+                    func.coalesce(func.sum(FoodLog.carbs), 0.0).label("carbs"),
+                )
+                .filter(FoodLog.user_id == dummy_user_id) if dummy_user_id else db.query(
                     date_expr_fl.label("date"),
                     func.coalesce(func.sum(FoodLog.calories), 0.0).label("calories"),
                     func.coalesce(func.sum(FoodLog.carbs), 0.0).label("carbs"),
@@ -409,6 +417,11 @@ async def get_latest_prediction(backend: str | None = None):
             )
             sport_rows = (
                 db.query(
+                    date_expr_sa.label("date"),
+                    func.coalesce(func.sum(SportActivity.calories_expended), 0.0).label(
+                        "sport"
+                    ),
+                ).filter(SportActivity.user_id == dummy_user_id) if dummy_user_id else db.query(
                     date_expr_sa.label("date"),
                     func.coalesce(func.sum(SportActivity.calories_expended), 0.0).label(
                         "sport"
@@ -435,13 +448,12 @@ async def get_latest_prediction(backend: str | None = None):
         sport_by_date = {r.date: r for r in sport_rows}
         # Include observed weights per date to anchor predictions
         date_expr_w = func.coalesce(WeightLog.logged_date, func.date(WeightLog.logged_at))
-        weight_rows = (
-            db.query(
-                date_expr_w.label("date"), func.avg(WeightLog.weight_kg).label("weight")
-            )
-            .group_by(date_expr_w)
-            .all()
+        wq = db.query(
+            date_expr_w.label("date"), func.avg(WeightLog.weight_kg).label("weight")
         )
+        if dummy_user_id:
+            wq = wq.filter(WeightLog.user_id == dummy_user_id)
+        weight_rows = wq.group_by(date_expr_w).all()
         weight_by_date = {r.date: float(getattr(r, "weight", 0.0) or 0.0) for r in weight_rows}
 
         records: list[dict] = []
@@ -568,15 +580,25 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
         """Aggregate directly from FoodLog and SportActivity per day when no summaries/CSV exist."""
         db = SessionLocal()
         try:
-            # collect all distinct dates from both tables
-            food_dates = [d[0] for d in db.query(FoodLog.logged_date).distinct().all()]
-            sport_dates = [
-                d[0] for d in db.query(SportActivity.logged_date).distinct().all()
-            ]
+            # collect all distinct dates for dummy user only (if present)
+            dummy_user = db.query(User).filter(User.email == "dummy@example.com").first()
+            dummy_user_id = getattr(dummy_user, "id", None)
+            q_fd = db.query(FoodLog.logged_date).distinct()
+            q_sd = db.query(SportActivity.logged_date).distinct()
+            q_wd = db.query(func.coalesce(WeightLog.logged_date, func.date(WeightLog.logged_at))).distinct()
+            if dummy_user_id:
+                q_fd = q_fd.filter(FoodLog.user_id == dummy_user_id)
+                q_sd = q_sd.filter(SportActivity.user_id == dummy_user_id)
+                q_wd = q_wd.filter(WeightLog.user_id == dummy_user_id)
+            food_dates = [d[0] for d in q_fd.all()]
+            sport_dates = [d[0] for d in q_sd.all()]
             date_expr_w = func.coalesce(
                 WeightLog.logged_date, func.date(WeightLog.logged_at)
             )
-            weight_dates = [d[0] for d in db.query(date_expr_w).distinct().all()]
+            qw = db.query(date_expr_w).distinct()
+            if dummy_user_id:
+                qw = qw.filter(WeightLog.user_id == dummy_user_id)
+            weight_dates = [d[0] for d in qw.all()]
             all_dates = sorted({*food_dates, *sport_dates, *weight_dates})
             if not all_dates:
                 return pd.DataFrame(columns=expected_cols)
@@ -584,33 +606,29 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
             for d in all_dates:
                 day_start = datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
                 day_end = day_start + timedelta(days=1)
-                cal, prot, carb, fat = (
-                    db.query(
-                        func.coalesce(func.sum(FoodLog.calories), 0.0),
-                        func.coalesce(func.sum(FoodLog.protein), 0.0),
-                        func.coalesce(func.sum(FoodLog.carbs), 0.0),
-                        func.coalesce(func.sum(FoodLog.fat), 0.0),
-                    )
-                    .filter(FoodLog.logged_date == d)
-                    .first()
-                )
-                sport_total = (
-                    db.query(
-                        func.coalesce(func.sum(SportActivity.calories_expended), 0.0)
-                    )
-                    .filter(SportActivity.logged_date == d)
-                    .scalar()
-                    or 0.0
-                )
+                q = db.query(
+                    func.coalesce(func.sum(FoodLog.calories), 0.0),
+                    func.coalesce(func.sum(FoodLog.protein), 0.0),
+                    func.coalesce(func.sum(FoodLog.carbs), 0.0),
+                    func.coalesce(func.sum(FoodLog.fat), 0.0),
+                ).filter(FoodLog.logged_date == d)
+                if dummy_user_id:
+                    q = q.filter(FoodLog.user_id == dummy_user_id)
+                cal, prot, carb, fat = q.first()
+                qsport = db.query(
+                    func.coalesce(func.sum(SportActivity.calories_expended), 0.0)
+                ).filter(SportActivity.logged_date == d)
+                if dummy_user_id:
+                    qsport = qsport.filter(SportActivity.user_id == dummy_user_id)
+                sport_total = qsport.scalar() or 0.0
                 # Observed weight: average per day across all users for public plots
                 date_expr_w = func.coalesce(
                     WeightLog.logged_date, func.date(WeightLog.logged_at)
                 )
-                w_obs = (
-                    db.query(func.avg(WeightLog.weight_kg))
-                    .filter(date_expr_w == d)
-                    .scalar()
-                )
+                wq = db.query(func.avg(WeightLog.weight_kg)).filter(date_expr_w == d)
+                if dummy_user_id:
+                    wq = wq.filter(WeightLog.user_id == dummy_user_id)
+                w_obs = wq.scalar()
                 records.append(
                     {
                         "date": d,
@@ -636,28 +654,28 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
             date_expr_fl = func.coalesce(
                 FoodLog.logged_date, func.date(FoodLog.logged_at)
             )
-            food_rows = (
-                db.query(
-                    date_expr_fl.label("date"),
-                    func.coalesce(func.sum(FoodLog.calories), 0.0).label("calories"),
-                    func.coalesce(func.sum(FoodLog.carbs), 0.0).label("carbs"),
-                )
-                .group_by(date_expr_fl)
-                .all()
+            dummy_user = db.query(User).filter(User.email == "dummy@example.com").first()
+            dummy_user_id = getattr(dummy_user, "id", None)
+            q_food = db.query(
+                date_expr_fl.label("date"),
+                func.coalesce(func.sum(FoodLog.calories), 0.0).label("calories"),
+                func.coalesce(func.sum(FoodLog.carbs), 0.0).label("carbs"),
             )
+            if dummy_user_id:
+                q_food = q_food.filter(FoodLog.user_id == dummy_user_id)
+            food_rows = q_food.group_by(date_expr_fl).all()
             date_expr_sa = func.coalesce(
                 SportActivity.logged_date, func.date(SportActivity.logged_at)
             )
-            sport_rows = (
-                db.query(
-                    date_expr_sa.label("date"),
-                    func.coalesce(func.sum(SportActivity.calories_expended), 0.0).label(
-                        "sport"
-                    ),
-                )
-                .group_by(date_expr_sa)
-                .all()
+            q_sport = db.query(
+                date_expr_sa.label("date"),
+                func.coalesce(func.sum(SportActivity.calories_expended), 0.0).label(
+                    "sport"
+                ),
             )
+            if dummy_user_id:
+                q_sport = q_sport.filter(SportActivity.user_id == dummy_user_id)
+            sport_rows = q_sport.group_by(date_expr_sa).all()
             # Exclude today's date; predictions are based on complete past days only
             today_utc = datetime.utcnow().date()
             dates = sorted(
@@ -683,13 +701,12 @@ def get_plot_data(last_n: int | None = None, source: str | None = None):
             sport_by_date = {r.date: r for r in sport_rows}
             # Fetch observed weights per day and map by date
             date_expr_w = func.coalesce(WeightLog.logged_date, func.date(WeightLog.logged_at))
-            weight_rows = (
-                db.query(
-                    date_expr_w.label("date"), func.avg(WeightLog.weight_kg).label("weight")
-                )
-                .group_by(date_expr_w)
-                .all()
+            qw = db.query(
+                date_expr_w.label("date"), func.avg(WeightLog.weight_kg).label("weight")
             )
+            if dummy_user_id:
+                qw = qw.filter(WeightLog.user_id == dummy_user_id)
+            weight_rows = qw.group_by(date_expr_w).all()
             weight_by_date = {r.date: float(getattr(r, "weight", 0.0) or 0.0) for r in weight_rows}
             records: list[dict] = []
             for d in dates:
