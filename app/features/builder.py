@@ -19,10 +19,10 @@ def load_variables_lookup() -> Dict[str, Dict[str, float]]:
     Keys include: 'Calories / 100g', 'Carbs', 'Sugar', 'Sel', 'Alcool', 'Water'.
     """
     candidates = [
-        os.path.join("/app", "data", "variables.csv"),
         os.path.join(pathlib.Path(__file__).resolve().parents[2], "data", "variables.csv"),
         os.path.join(os.getcwd(), "data", "variables.csv"),
     ]
+    # Only use variables.csv locally; on Render we should rely on DB values populated from CSVs.
     csv_path = next((p for p in candidates if os.path.exists(p)), None)
     if not csv_path:
         return {}
@@ -76,12 +76,12 @@ def compute_nutrients_by_date(db: Session, dates: List, user_id) -> Dict:
         acc = by_date.get(d)
         if acc is None:
             continue
-        acc["calories"] += per100["Calories / 100g"] * scale
-        acc["carbs"] += per100["Carbs"] * scale
-        acc["sugar"] += per100["Sugar"] * scale
-        acc["sel"] += per100["Sel"] * scale
-        acc["alcool"] += per100["Alcool"] * scale
-        acc["water"] += per100["Water"] * scale
+        acc["calories"] += float(per100.get("Calories / 100g", 0.0) or 0.0) * scale
+        acc["carbs"] += float(per100.get("Carbs", 0.0) or 0.0) * scale
+        acc["sugar"] += float(per100.get("Sugar", 0.0) or 0.0) * scale
+        acc["sel"] += float(per100.get("Sel", 0.0) or 0.0) * scale
+        acc["alcool"] += float(per100.get("Alcool", 0.0) or 0.0) * scale
+        acc["water"] += float(per100.get("Water", 0.0) or 0.0) * scale
     return by_date
 
 
@@ -156,7 +156,11 @@ def build_prediction_features_from_db() -> pd.DataFrame:
                     "pds": float(weight_by_date.get(d, 0.0)),
                 }
             )
-        return pd.DataFrame(recs)
+        df = pd.DataFrame(recs)
+        # NA coercion: ensure no NaN/NA leak into inference pipeline
+        for col in ["calories","carbs","sugar","sel","alcool","water","sport","pds"]:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+        return df
     finally:
         db.close()
 

@@ -84,6 +84,11 @@ class Food(Base):
     protein = Column(Float)
     carbs = Column(Float)
     fat = Column(Float)
+    # Additional nutrients for DB parity with variables.csv
+    sugar = Column(Float)
+    sel = Column(Float)
+    alcool = Column(Float)
+    water = Column(Float)
 
 
 class DailySummary(Base):

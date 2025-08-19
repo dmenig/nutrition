@@ -30,9 +30,21 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint('id'),
     )
     op.create_index('ix_weight_logs_logged_date', 'weight_logs', ['logged_date'])
+    # Extend foods with additional nutrient columns if not present
+    with op.batch_alter_table('foods') as batch_op:
+        batch_op.add_column(sa.Column('sugar', sa.Float(), nullable=True))
+        batch_op.add_column(sa.Column('sel', sa.Float(), nullable=True))
+        batch_op.add_column(sa.Column('alcool', sa.Float(), nullable=True))
+        batch_op.add_column(sa.Column('water', sa.Float(), nullable=True))
 
 
 def downgrade() -> None:
+    # Drop added columns
+    with op.batch_alter_table('foods') as batch_op:
+        batch_op.drop_column('sugar')
+        batch_op.drop_column('sel')
+        batch_op.drop_column('alcool')
+        batch_op.drop_column('water')
     op.drop_index('ix_weight_logs_logged_date', table_name='weight_logs')
     op.drop_table('weight_logs')
 

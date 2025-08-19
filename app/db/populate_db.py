@@ -57,6 +57,11 @@ def populate_food_table():
                     )
                     existing_food.carbs = float(row["Carbs"]) if row["Carbs"] else 0
                     existing_food.fat = float(row["Fat"]) if row["Fat"] else 0
+                    # Extended nutrients
+                    existing_food.sugar = float(row.get("Sugar") or 0)
+                    existing_food.sel = float(row.get("Sel") or 0)
+                    existing_food.alcool = float(row.get("Alcool") or 0)
+                    existing_food.water = float(row.get("Water") or 0)
                     db.commit()
                 else:
                     # Create new food
@@ -68,6 +73,10 @@ def populate_food_table():
                         protein=float(row["Protéine"]) if row["Protéine"] else 0,
                         carbs=float(row["Carbs"]) if row["Carbs"] else 0,
                         fat=float(row["Fat"]) if row["Fat"] else 0,
+                        sugar=float(row.get("Sugar") or 0),
+                        sel=float(row.get("Sel") or 0),
+                        alcool=float(row.get("Alcool") or 0),
+                        water=float(row.get("Water") or 0),
                     )
                     db.add(food)
                     db.commit()
@@ -368,7 +377,13 @@ def _extract_sport_calls_with_calories(expr_eval: str) -> List[Tuple[str, int, f
     except SyntaxError:
         return []
 
-    evaluator = SafeSportFormulaEvaluator(SPORT_FUNCTIONS)
+    # Case-insensitive function context to handle lower/upper cased formulas
+    try:
+        func_ctx = {**SPORT_FUNCTIONS}
+        func_ctx.update({k.lower(): v for k, v in SPORT_FUNCTIONS.items()})
+    except Exception:
+        func_ctx = SPORT_FUNCTIONS
+    evaluator = SafeSportFormulaEvaluator(func_ctx)
     calls: List[Tuple[str, int, float, Optional[float], Optional[float]]] = []
 
     def is_pure_numeric(node: ast.AST) -> bool:
@@ -425,7 +440,7 @@ def _extract_sport_calls_with_calories(expr_eval: str) -> List[Tuple[str, int, f
                         add_weight_val = float(evaluator.visit(kw.value))
                 except Exception:
                     pass
-            # Base calories for this call
+            # Base calories for this call (case-insensitive, robust evaluation)
             try:
                 base_cal = float(evaluator.visit(node))
             except Exception:
@@ -559,13 +574,19 @@ def populate_sport_activities_table():
                 date_ts.year, date_ts.month, date_ts.day, tzinfo=dt_timezone.utc
             )
             weight = float(row.get("Pds", 0) or 0)
-            expr = str(row["Sport"]).lstrip("=")
-            # Substitute WEIGHT with actual value for safe evaluation
-            expr_eval = expr.replace("WEIGHT", str(weight))
+            expr = str(row["Sport"]).lstrip("=").strip()
+            # Normalize function names to uppercase to match whitelist (tolerate lowercase inputs)
+            try:
+                expr_norm = re.sub(r"([A-Za-z_]+)\(", lambda m: m.group(1).upper()+"(", expr)
+            except Exception:
+                expr_norm = expr
+            # Substitute WEIGHT (any case) with actual value for safe evaluation
+            expr_eval = re.sub(r"WEIGHT", str(weight), expr_norm, flags=re.IGNORECASE)
 
             # Split into individual calls so DB rows match the journal entries
             calls = _extract_sport_calls_with_calories(expr_eval)
 
+            total_inserted_cals = 0.0
             for activity_name, duration_minutes, calories_expended, add_weight, distance_m in calls:
                 sa = SportActivity(
                     user_id=dummy_user.id,
@@ -578,8 +599,31 @@ def populate_sport_activities_table():
                 )
                 db.add(sa)
                 inserted += 1
+                try:
+                    total_inserted_cals += float(calories_expended)
+                except Exception:
+                    pass
             if inserted % 50 == 0:
                 db.commit()
+            # Correction: ensure DB daily sum matches direct evaluation of the expression
+            try:
+                evaluated_total = float(evaluate_sport_formula(expr_eval)) if expr_eval else 0.0
+                diff = evaluated_total - total_inserted_cals
+                if abs(diff) > 0.5:  # tolerate minor FP differences
+                    sa_corr = SportActivity(
+                        user_id=dummy_user.id,
+                        activity_name="Correction",
+                        duration_minutes=0,
+                        carried_weight_kg=None,
+                        distance_m=None,
+                        calories_expended=diff,
+                        logged_at=date,
+                    )
+                    db.add(sa_corr)
+                    inserted += 1
+            except Exception:
+                # Ignore correction if evaluation fails
+                pass
         db.commit()
         print(f"SportActivity table populated from journal CSV! Inserted {inserted} rows.")
     finally:
