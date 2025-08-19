@@ -9,7 +9,16 @@ class ErrorReportingInterceptor : Interceptor {
             val response = chain.proceed(chain.request())
             if (!response.isSuccessful) {
                 val code = response.code
-                ErrorReporter.show("Network error (${code}) while calling ${chain.request().url.encodedPath}")
+                val path = chain.request().url.encodedPath
+                // Suppress expected auth bootstrap errors:
+                // - 400 on register when the user already exists
+                // - 401 on token when login-first fails before register+retry
+                val isExpectedAuthBootstrapError =
+                    (code == 400 && path.endsWith("/api/v1/auth/register")) ||
+                    (code == 401 && path.endsWith("/api/v1/auth/token"))
+                if (!isExpectedAuthBootstrapError) {
+                    ErrorReporter.show("Network error (${code}) while calling ${path}")
+                }
             }
             response
         } catch (e: Exception) {

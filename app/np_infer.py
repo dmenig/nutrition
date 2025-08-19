@@ -125,18 +125,18 @@ def reconstruct_trajectory_numpy(
 
     calories_delta = calories_in_unnorm - sport_unnorm - base_thousands_clamped * 1000.0
 
-    # Anchor the trajectory using normalized observed weight at t=0 when available
+    # Anchor the trajectory using normalized observed weight at t=0 when available,
+    # but DO NOT override subsequent steps with observed values. We want a pure model
+    # prediction trajectory for plotting.
     first_obs_norm = float(observed_weights[0, 0])
     start_weight = first_obs_norm if first_obs_norm != 0.0 else float(initial_adj_weight)
     w_adj = np.zeros((1, seq_len), dtype=np.float32)
     w_adj[:, 0] = start_weight
     for t in range(1, seq_len):
         weight_change = calories_delta[:, t - 1] / K_CAL_PER_KG
-        candidate = w_adj[:, t - 1] + weight_change
-        obs_norm = observed_weights[:, t]
-        # If an observed weight exists at this timestep (non-zero normalized), use it
-        w_adj[:, t] = np.where(obs_norm != 0.0, obs_norm, candidate)
+        w_adj[:, t] = w_adj[:, t - 1] + weight_change
 
+    # For now, return the same sequence for predicted observed weight.
     return w_adj, w_adj
 
 

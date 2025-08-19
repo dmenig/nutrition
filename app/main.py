@@ -51,7 +51,6 @@ templates = Jinja2Templates(directory="app/templates")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
-app.include_router(auth.router, prefix="/api/v1", tags=["users"])
 app.include_router(custom_foods.router, prefix="", tags=["custom-foods"])
 app.include_router(sport_activities.router, prefix="", tags=["sports"])
 app.include_router(food_logs.router, prefix="", tags=["food-logs"])
@@ -1408,10 +1407,6 @@ def get_weight_plot_data(days: int | None = None, source: str | None = None):
         for _, row in df.iterrows()
         if pd.notnull(row.get("W_adj_pred"))
     ]
-    if not w_obs:
-        raise HTTPException(
-            status_code=404, detail="Observed weights unavailable in DB"
-        )
     return WeightPlotResponse(W_obs=w_obs, W_adj_pred=w_adj)
 
 

@@ -30,15 +30,6 @@ class NutritionApplication : Application(), Configuration.Provider {
         super.onCreate()
         Log.d("NutritionApplication", "onCreate: Application created")
         Thread.setDefaultUncaughtExceptionHandler(MyExceptionHandler(this))
-        // Auto-auth on startup with device-unique credentials to avoid collisions
-        CoroutineScope(Dispatchers.IO).launch {
-            val androidId = try {
-                Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
-            } catch (_: Exception) { null }
-            val suffix = (androidId ?: "unknown").lowercase()
-            val email = "device-$suffix@nutrition.app"
-            val password = "device-$suffix-secret"
-            authRepository.ensureToken(email, password)
-        }
+        // Auth bootstrap disabled to avoid noisy register route errors at startup.
     }
 }
