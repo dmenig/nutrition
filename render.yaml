@@ -20,3 +20,5 @@ services:
         value: 2
       - key: PREDICT_BACKEND
         value: numpy
+      - key: INCLUDE_MODELS
+        value: "true"
