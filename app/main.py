@@ -377,6 +377,7 @@ class PredictionService:
         base_metabolisms_np = base_metabolisms.squeeze()
         w_adj_np = w_adj_pred.squeeze()
         base_metabolisms_kcal = base_metabolisms_np * 1000.0
+        # w_adj and observed inputs are in normalized space; convert to absolute for output
         w_adj_pred_actual = w_adj_np + weight_mean
         actual_weight = features_df["pds"].values
         water_retention = actual_weight - w_adj_pred_actual
