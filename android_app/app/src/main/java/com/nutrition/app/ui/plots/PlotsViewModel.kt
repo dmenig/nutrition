@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.github.mikephil.charting.data.Entry
 import com.nutrition.app.data.PlotsRepository
+import com.nutrition.app.data.PlotsRepository.WeightSeries
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,8 +19,11 @@ class PlotsViewModel @Inject constructor(
     private val plotsRepository: PlotsRepository
 ) : ViewModel() {
 
-    private val _weightData = MutableStateFlow<List<Entry>>(emptyList())
-    val weightData: StateFlow<List<Entry>> = _weightData
+    private val _weightObserved = MutableStateFlow<List<Entry>>(emptyList())
+    val weightObserved: StateFlow<List<Entry>> = _weightObserved
+
+    private val _weightAdjusted = MutableStateFlow<List<Entry>>(emptyList())
+    val weightAdjusted: StateFlow<List<Entry>> = _weightAdjusted
 
     private val _metabolismData = MutableStateFlow<List<Entry>>(emptyList())
     val metabolismData: StateFlow<List<Entry>> = _metabolismData
@@ -54,10 +58,13 @@ class PlotsViewModel @Inject constructor(
     private fun fetchWeightData(dateRange: DateRange) {
         viewModelScope.launch {
             try {
-                _weightData.value = plotsRepository.getWeightData(toDataDateRange(dateRange))
+                val series: WeightSeries = plotsRepository.getWeightData(toDataDateRange(dateRange))
+                _weightObserved.value = series.observed
+                _weightAdjusted.value = series.adjusted
             } catch (e: Exception) {
                 Log.e("PlotsViewModel", "Failed to fetch weight data", e)
-                _weightData.value = emptyList()
+                _weightObserved.value = emptyList()
+                _weightAdjusted.value = emptyList()
             }
         }
     }

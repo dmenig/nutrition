@@ -100,11 +100,15 @@ fun PlotsScreen(viewModel: PlotsViewModel = hiltViewModel()) {
 @Composable
 fun LineChartComposable(plotType: String, viewModel: PlotsViewModel = hiltViewModel()) {
     val data by when (plotType) {
-        "Weight" -> viewModel.weightData.collectAsState()
+        "Weight" -> remember { mutableStateOf(emptyList<Entry>()) }
         "Metabolism" -> viewModel.metabolismData.collectAsState()
         "Energy Balance" -> viewModel.energyBalanceData.collectAsState()
         else -> remember { mutableStateOf(emptyList()) }
     }
+
+    // For weight, we render two datasets (observed and adjusted)
+    val weightObserved by viewModel.weightObserved.collectAsState()
+    val weightAdjusted by viewModel.weightAdjusted.collectAsState()
 
     AndroidView(
         modifier = Modifier.fillMaxSize(),
@@ -137,19 +141,43 @@ fun LineChartComposable(plotType: String, viewModel: PlotsViewModel = hiltViewMo
             }
         },
         update = { chart ->
-            if (data.isNotEmpty()) {
-                val dataSet = LineDataSet(data, plotType)
-                dataSet.setDrawValues(false)
-                dataSet.setDrawCircles(true)
-                dataSet.setDrawCircleHole(false)
-                dataSet.circleRadius = 4f
-                dataSet.lineWidth = 2f
+            if (plotType == "Weight") {
+                if (weightObserved.isNotEmpty() || weightAdjusted.isNotEmpty()) {
+                    val observedSet = LineDataSet(weightObserved, "Observed weight")
+                    observedSet.setDrawValues(false)
+                    observedSet.setDrawCircles(true)
+                    observedSet.setDrawCircleHole(false)
+                    observedSet.circleRadius = 3.5f
+                    observedSet.lineWidth = 1.8f
+                    observedSet.color = 0xFF1976D2.toInt() // blue
+                    observedSet.setCircleColor(0xFF1976D2.toInt())
 
-                val lineData = LineData(dataSet)
-                chart.data = lineData
-                chart.invalidate()
+                    val adjustedSet = LineDataSet(weightAdjusted, "Adjusted weight")
+                    adjustedSet.setDrawValues(false)
+                    adjustedSet.setDrawCircles(false)
+                    adjustedSet.lineWidth = 2.2f
+                    adjustedSet.color = 0xFFD32F2F.toInt() // red
+
+                    val lineData = LineData(observedSet, adjustedSet)
+                    chart.data = lineData
+                    chart.invalidate()
+                } else {
+                    chart.clear()
+                }
             } else {
-                chart.clear()
+                if (data.isNotEmpty()) {
+                    val dataSet = LineDataSet(data, plotType)
+                    dataSet.setDrawValues(false)
+                    dataSet.setDrawCircles(true)
+                    dataSet.setDrawCircleHole(false)
+                    dataSet.circleRadius = 4f
+                    dataSet.lineWidth = 2f
+                    val lineData = LineData(dataSet)
+                    chart.data = lineData
+                    chart.invalidate()
+                } else {
+                    chart.clear()
+                }
             }
         }
     )

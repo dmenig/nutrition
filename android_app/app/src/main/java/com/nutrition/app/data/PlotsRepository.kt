@@ -10,6 +10,10 @@ import android.util.Log
 class PlotsRepository @Inject constructor(
     private val plotsApiService: PlotsApiService
 ) {
+    data class WeightSeries(
+        val observed: List<Entry>,
+        val adjusted: List<Entry>
+    )
     // MPAndroidChart uses Float for X; avoid precision loss by using days-since-epoch on the axis.
     // Normalize backend time_index which may be in ms, seconds, or days (older servers).
     private fun normalizeToEpochMs(raw: Long): Long {
@@ -32,23 +36,23 @@ class PlotsRepository @Inject constructor(
 
     
 
-    suspend fun getWeightData(dateRange: DateRange): List<Entry> {
+    suspend fun getWeightData(dateRange: DateRange): WeightSeries {
         val days = when (dateRange) {
             DateRange.WEEK -> 7
             DateRange.MONTH -> 30
             DateRange.YEAR -> 365
         }
         val resp = plotsApiService.getWeightPlot(days = days)
-        // Use model predictions only; no fallback to observed weights
-        val series = resp.W_adj_pred
-        val entries = series.map { Entry(toDaysSinceEpochFromAny(it.time_index), it.value) }
-        if (entries.isNotEmpty()) {
-            val preview = entries.take(3).joinToString { "(${it.x}, ${it.y})" }
-            Log.d("PlotsRepository", "Weight entries preview: $preview")
+        val observed = resp.W_obs.map { Entry(toDaysSinceEpochFromAny(it.time_index), it.value) }
+        val adjusted = resp.W_adj_pred.map { Entry(toDaysSinceEpochFromAny(it.time_index), it.value) }
+        if (adjusted.isNotEmpty() || observed.isNotEmpty()) {
+            val previewAdj = adjusted.take(3).joinToString { "(${it.x}, ${it.y})" }
+            val previewObs = observed.take(3).joinToString { "(${it.x}, ${it.y})" }
+            Log.d("PlotsRepository", "Weight adjusted preview: $previewAdj | observed preview: $previewObs")
         } else {
             Log.d("PlotsRepository", "Weight entries empty")
         }
-        return entries
+        return WeightSeries(observed = observed, adjusted = adjusted)
     }
 
     suspend fun getMetabolismData(dateRange: DateRange): List<Entry> {
