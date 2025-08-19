@@ -81,6 +81,8 @@ class PredictionService:
                     self.params_path,
                     "/app/best_params.json",
                     "/app/models/best_params.json",
+                    os.path.join(os.getcwd(), "app", "models", "best_params.json"),
+                    os.path.join(pathlib.Path(__file__).resolve().parents[0], "models", "best_params.json"),
                 ]
             )
             with open(params_path, "r") as f:
@@ -102,6 +104,8 @@ class PredictionService:
             self.npz_path,
             "/app/recurrent_model_np.npz",
             "/app/models/recurrent_model_np.npz",
+            os.path.join(os.getcwd(), "app", "models", "recurrent_model_np.npz"),
+            os.path.join(pathlib.Path(__file__).resolve().parents[0], "models", "recurrent_model_np.npz"),
         ]
         existing_npz = next((p for p in npz_candidates if os.path.exists(p)), None)
         if existing_npz is not None:
