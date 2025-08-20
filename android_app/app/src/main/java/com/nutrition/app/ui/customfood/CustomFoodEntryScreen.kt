@@ -23,6 +23,12 @@ fun CustomFoodEntryScreen(
     var protein by remember { mutableStateOf("") }
     var carbohydrates by remember { mutableStateOf("") }
     var fat by remember { mutableStateOf("") }
+    var sugar by remember { mutableStateOf("") }
+    var sfat by remember { mutableStateOf("") }
+    var freeSugar by remember { mutableStateOf("") }
+    var fibres by remember { mutableStateOf("") }
+    var sel by remember { mutableStateOf("") }
+    var alcool by remember { mutableStateOf("") }
 
     Scaffold(
         topBar = {
@@ -80,6 +86,54 @@ fun CustomFoodEntryScreen(
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier.fillMaxWidth()
             )
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = sfat,
+                onValueChange = { sfat = it },
+                label = { Text("Saturated fat (per 100g)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = sugar,
+                onValueChange = { sugar = it },
+                label = { Text("Sugar (per 100g)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = freeSugar,
+                onValueChange = { freeSugar = it },
+                label = { Text("Free sugar (per 100g)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = fibres,
+                onValueChange = { fibres = it },
+                label = { Text("Fibres (per 100g)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = sel,
+                onValueChange = { sel = it },
+                label = { Text("Salt (per 100g)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = alcool,
+                onValueChange = { alcool = it },
+                label = { Text("Alcohol (per 100g)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.fillMaxWidth()
+            )
             Spacer(modifier = Modifier.height(16.dp))
             Button(
                 onClick = {
@@ -87,7 +141,19 @@ fun CustomFoodEntryScreen(
                     val prot = protein.toFloatOrNull()
                     val carbsVal = carbohydrates.toFloatOrNull()
                     val fatVal = fat.toFloatOrNull()
-                    viewModel.createFood(name, cals, prot, carbsVal, fatVal) { onBackClick() }
+                    viewModel.createFood(
+                        name = name,
+                        calories = cals,
+                        protein = prot,
+                        carbs = carbsVal,
+                        fat = fatVal,
+                        sugar = sugar.toFloatOrNull(),
+                        sfat = sfat.toFloatOrNull(),
+                        freeSugar = freeSugar.toFloatOrNull(),
+                        fibres = fibres.toFloatOrNull(),
+                        sel = sel.toFloatOrNull(),
+                        alcool = alcool.toFloatOrNull(),
+                    ) { onBackClick() }
                 },
                 modifier = Modifier.fillMaxWidth()
             ) { Text("Add Food to Database") }

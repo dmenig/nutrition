@@ -42,6 +42,12 @@ def create_food(food: FoodCreate, db: Session = Depends(get_db)):
         protein=food.protein,
         carbs=food.carbs,
         fat=food.fat,
+        sugar=food.sugar,
+        sfat=food.sfat,
+        free_sugar=food.free_sugar,
+        fibres=food.fibres,
+        sel=food.sel,
+        alcool=food.alcool,
     )
     db.add(db_food)
     db.commit()

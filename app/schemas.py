@@ -146,6 +146,13 @@ class FoodOut(BaseModel):
     protein: Optional[float]
     carbs: Optional[float]
     fat: Optional[float]
+    # Optional additional nutrients (may not be used by all clients)
+    sugar: Optional[float] = None
+    sfat: Optional[float] = None
+    free_sugar: Optional[float] = None
+    fibres: Optional[float] = None
+    sel: Optional[float] = None
+    alcool: Optional[float] = None
 
     class Config:
         from_attributes = True
@@ -157,3 +164,10 @@ class FoodCreate(BaseModel):
     protein: Optional[float] = None
     carbs: Optional[float] = None
     fat: Optional[float] = None
+    # Extra nutrients (per 100g) supported by the DB
+    sugar: Optional[float] = None
+    sfat: Optional[float] = None
+    free_sugar: Optional[float] = None
+    fibres: Optional[float] = None
+    sel: Optional[float] = None
+    alcool: Optional[float] = None

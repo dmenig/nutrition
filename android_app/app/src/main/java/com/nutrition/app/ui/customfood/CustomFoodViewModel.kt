@@ -39,9 +39,22 @@ class CustomFoodViewModel @Inject constructor(
         }
     }
 
-    fun createFood(name: String, calories: Float, protein: Float?, carbs: Float?, fat: Float?, onDone: () -> Unit) {
+    fun createFood(
+        name: String,
+        calories: Float,
+        protein: Float?,
+        carbs: Float?,
+        fat: Float?,
+        sugar: Float? = null,
+        sfat: Float? = null,
+        freeSugar: Float? = null,
+        fibres: Float? = null,
+        sel: Float? = null,
+        alcool: Float? = null,
+        onDone: () -> Unit
+    ) {
         viewModelScope.launch {
-            repository.createFood(name, calories, protein, carbs, fat)
+            repository.createFood(name, calories, protein, carbs, fat, sugar, sfat, freeSugar, fibres, sel, alcool)
             onDone()
         }
     }
