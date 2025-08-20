@@ -29,7 +29,7 @@ import java.time.ZoneOffset
 @HiltViewModel
 class DailyLogViewModel @Inject constructor(
     private val repository: NutritionRepository,
-    private val remoteRepository: com.nutrition.app.data.NutritionRepository
+    private val remoteRepository: com.nutrition.app.data.NutritionRepository,
 ) : ViewModel() {
 
     private val _selectedDate = MutableStateFlow(Date())
@@ -46,6 +46,7 @@ class DailyLogViewModel @Inject constructor(
 
     private val _weightKg = MutableStateFlow<Float?>(null)
     val weightKg: StateFlow<Float?> = _weightKg
+
 
     init {
         // Daily summary flow tied to selected date
@@ -165,6 +166,8 @@ class DailyLogViewModel @Inject constructor(
             }
         }
     }
+
+    // No auth flows; weights operate on dummy public user
 
     private fun toEpochMillis(dt: LocalDateTime): Long =
         dt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()

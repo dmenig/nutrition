@@ -6,7 +6,7 @@ from datetime import datetime as _dt, timezone as _tz, date as _date
 
 from app.db.database import get_db
 from app.core.auth import get_current_user
-from app.db.models import WeightLog
+from app.db.models import WeightLog, User
 from app.schemas import WeightLogCreate, WeightLogOut
 from app.services.summary import rebuild_predictions_cache_async
 
@@ -16,6 +16,31 @@ router = APIRouter()
 
 def _day_start_utc(dt: _dt) -> _dt:
     return _dt(dt.year, dt.month, dt.day, tzinfo=_tz.utc)
+
+
+def _ensure_dummy_user(db: Session) -> User:
+    dummy = db.query(User).filter(User.email == "dummy@example.com").first()
+    if dummy:
+        return dummy
+    import uuid as _uuid
+    from sqlalchemy import text as _text
+
+    user_id = str(_uuid.uuid4())
+    db.execute(
+        _text(
+            """
+            INSERT INTO users (id, email, hashed_password)
+            VALUES (:id, :email, :hashed_password)
+            """
+        ),
+        {
+            "id": user_id,
+            "email": "dummy@example.com",
+            "hashed_password": "public",
+        },
+    )
+    db.commit()
+    return db.query(User).filter(User.id == user_id).first()
 
 
 @router.post("/api/v1/weights", response_model=WeightLogOut, status_code=status.HTTP_201_CREATED)
@@ -116,5 +141,60 @@ def upsert_weights_bulk(
     except Exception:
         pass
     return inserted
+
+
+# Public, no-auth variants operating on the dummy user for single-user setups
+@router.get("/api/v1/weights/public", response_model=WeightLogOut)
+def get_weight_for_day_public(
+    date: _date = Query(..., description="Date in YYYY-MM-DD"),
+    db: Session = Depends(get_db),
+):
+    dummy = _ensure_dummy_user(db)
+    day_start = _dt(date.year, date.month, date.day, tzinfo=_tz.utc)
+    wl = (
+        db.query(WeightLog)
+        .filter(
+            WeightLog.user_id == dummy.id,
+            func.coalesce(WeightLog.logged_date, func.date(WeightLog.logged_at)) == day_start.date(),
+        )
+        .order_by(WeightLog.logged_at.desc())
+        .first()
+    )
+    if wl is None:
+        raise HTTPException(status_code=404, detail="No weight logged for this date")
+    return wl
+
+
+@router.post("/api/v1/weights/public", response_model=WeightLogOut, status_code=status.HTTP_201_CREATED)
+def upsert_weight_for_day_public(
+    payload: WeightLogCreate,
+    db: Session = Depends(get_db),
+):
+    dummy = _ensure_dummy_user(db)
+    if payload.logged_at.tzinfo is None:
+        logged_at = payload.logged_at.replace(tzinfo=_tz.utc)
+    else:
+        logged_at = payload.logged_at.astimezone(_tz.utc)
+    day_dt = _day_start_utc(logged_at)
+    db.query(WeightLog).filter(
+        WeightLog.user_id == dummy.id,
+        func.coalesce(WeightLog.logged_date, func.date(WeightLog.logged_at)) == day_dt.date(),
+    ).delete()
+    wl = WeightLog(
+        user_id=dummy.id,
+        weight_kg=float(payload.weight_kg),
+        logged_at=day_dt,
+        logged_date=day_dt.date(),
+    )
+    db.add(wl)
+    db.commit()
+    db.refresh(wl)
+    try:
+        today_utc = _dt.now(tz=_tz.utc).date()
+        if wl.logged_at.date() < today_utc:
+            rebuild_predictions_cache_async()
+    except Exception:
+        pass
+    return wl
 
 

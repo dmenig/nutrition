@@ -23,6 +23,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Button
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -96,7 +97,7 @@ fun DailyLogScreen(
                         Text("Carbs: ${dailySummary?.totalCarbs ?: "N/A"} g")
                         Text("Fat: ${dailySummary?.totalFat ?: "N/A"} g")
                         Spacer(modifier = Modifier.height(8.dp))
-                        var weightInput by rememberSaveable { mutableStateOf(weightKg?.toString() ?: "") }
+                        var weightInput by rememberSaveable(weightKg) { mutableStateOf(weightKg?.toString() ?: "") }
                         Text(text = "Weight (kg): ${weightKg?.let { String.format("%.1f", it) } ?: "—"}")
                         OutlinedTextField(
                             value = weightInput,
@@ -111,6 +112,7 @@ fun DailyLogScreen(
                                 if (v != null && v > 0f) viewModel.saveWeight(v)
                             }) { Text("Save Weight") }
                         }
+                        // No sign-in UI; weights are public dummy user now
                     }
                 }
 

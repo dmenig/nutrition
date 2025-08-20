@@ -43,8 +43,7 @@ import java.time.LocalDateTime
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import com.nutrition.app.util.ErrorReportingInterceptor
-import com.nutrition.app.util.AuthInterceptor
-import com.nutrition.app.util.AuthTokenStore
+// Auth removed
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -79,7 +78,7 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideOkHttpClient(tokenStore: AuthTokenStore): OkHttpClient {
+    fun provideOkHttpClient(): OkHttpClient {
         val logging = HttpLoggingInterceptor().apply {
             setLevel(HttpLoggingInterceptor.Level.BODY)
         }
@@ -96,7 +95,6 @@ object AppModule {
         return OkHttpClient.Builder()
             .addInterceptor(logging)
             .addInterceptor(ErrorReportingInterceptor())
-            .addInterceptor(AuthInterceptor(tokenStore))
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
             // No overall call timeout to allow slow cold starts on server
@@ -106,11 +104,7 @@ object AppModule {
             .build()
     }
 
-    @Provides
-    @Singleton
-    fun provideAuthTokenStore(@ApplicationContext context: Context): AuthTokenStore {
-        return AuthTokenStore(context)
-    }
+    // No auth token store
 
     @Provides
     @Singleton
@@ -169,11 +163,7 @@ object AppModule {
         return retrofit.create(NutritionApiService::class.java)
     }
 
-    @Provides
-    @Singleton
-    fun provideAuthApi(@Named("NutritionApi") retrofit: Retrofit): com.nutrition.app.data.remote.AuthApi {
-        return retrofit.create(com.nutrition.app.data.remote.AuthApi::class.java)
-    }
+    // No auth API
 
     @Provides
     @Singleton
