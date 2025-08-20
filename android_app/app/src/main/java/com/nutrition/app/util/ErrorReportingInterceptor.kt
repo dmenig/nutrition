@@ -16,7 +16,10 @@ class ErrorReportingInterceptor : Interceptor {
                 val isExpectedAuthBootstrapError =
                     (code == 400 && path.endsWith("/api/v1/auth/register")) ||
                     (code == 401 && path.endsWith("/api/v1/auth/token"))
-                if (!isExpectedAuthBootstrapError) {
+                // Suppress unauthenticated weight lookups (shown as empty until login)
+                val isExpectedWeightAuth =
+                    (code == 401 && (path.endsWith("/api/v1/weights") || path.endsWith("/api/v1/weights/")))
+                if (!isExpectedAuthBootstrapError && !isExpectedWeightAuth) {
                     ErrorReporter.show("Network error (${code}) while calling ${path}")
                 }
             }
