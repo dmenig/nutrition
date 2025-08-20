@@ -85,7 +85,11 @@ class Food(Base):
     carbs = Column(Float)
     fat = Column(Float)
     # Additional nutrients for DB parity with variables.csv
+    # Note: these are per-100g values from the source CSV
     sugar = Column(Float)
+    sfat = Column(Float)  # saturated fat
+    free_sugar = Column(Float)
+    fibres = Column(Float)
     sel = Column(Float)
     alcool = Column(Float)
     water = Column(Float)

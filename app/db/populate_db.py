@@ -57,8 +57,11 @@ def populate_food_table():
                     )
                     existing_food.carbs = float(row["Carbs"]) if row["Carbs"] else 0
                     existing_food.fat = float(row["Fat"]) if row["Fat"] else 0
-                    # Extended nutrients
+                    # Extended nutrients (per 100g)
                     existing_food.sugar = float(row.get("Sugar") or 0)
+                    existing_food.sfat = float(row.get("SFat") or 0)
+                    existing_food.free_sugar = float(row.get("Free sugar") or 0)
+                    existing_food.fibres = float(row.get("Fibres") or 0)
                     existing_food.sel = float(row.get("Sel") or 0)
                     existing_food.alcool = float(row.get("Alcool") or 0)
                     existing_food.water = float(row.get("Water") or 0)
@@ -74,6 +77,9 @@ def populate_food_table():
                         carbs=float(row["Carbs"]) if row["Carbs"] else 0,
                         fat=float(row["Fat"]) if row["Fat"] else 0,
                         sugar=float(row.get("Sugar") or 0),
+                        sfat=float(row.get("SFat") or 0),
+                        free_sugar=float(row.get("Free sugar") or 0),
+                        fibres=float(row.get("Fibres") or 0),
                         sel=float(row.get("Sel") or 0),
                         alcool=float(row.get("Alcool") or 0),
                         water=float(row.get("Water") or 0),
