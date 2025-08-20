@@ -19,6 +19,7 @@ from app.routers import (
     custom_foods,
     sport_activities,
     food_logs,
+    weight_logs,
     admin,
     foods,
 )
@@ -56,6 +57,7 @@ app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(custom_foods.router, prefix="", tags=["custom-foods"])
 app.include_router(sport_activities.router, prefix="", tags=["sports"])
 app.include_router(food_logs.router, prefix="", tags=["food-logs"])
+app.include_router(weight_logs.router, prefix="", tags=["weights"])
 app.include_router(foods.router, prefix="", tags=["foods"])
 
 

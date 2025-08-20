@@ -139,6 +139,26 @@ class EnergyBalancePlotResponse(BaseModel):
     C_exp_t: list[PlotPoint]
 
 
+from datetime import date as _date
+
+
+class WeightLogBase(BaseModel):
+    weight_kg: float
+    logged_at: datetime
+
+
+class WeightLogCreate(WeightLogBase):
+    pass
+
+
+class WeightLogOut(WeightLogBase):
+    id: UUID
+    user_id: UUID
+
+    class Config:
+        from_attributes = True
+
+
 class FoodOut(BaseModel):
     id: UUID
     name: str

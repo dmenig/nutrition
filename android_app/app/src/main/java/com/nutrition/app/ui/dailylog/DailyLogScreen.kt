@@ -21,6 +21,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Button
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -54,6 +56,7 @@ fun DailyLogScreen(
     val dailySummary by viewModel.dailySummary.collectAsState()
     val foodLogs by viewModel.foodLogs.collectAsState()
     val sportLogs by viewModel.sportLogs.collectAsState()
+    val weightKg by viewModel.weightKg.collectAsState()
 
     var isFoodSectionExpanded by rememberSaveable { mutableStateOf(false) }
     var isSportSectionExpanded by rememberSaveable { mutableStateOf(false) }
@@ -92,6 +95,22 @@ fun DailyLogScreen(
                         Text("Protein: ${dailySummary?.totalProtein ?: "N/A"} g")
                         Text("Carbs: ${dailySummary?.totalCarbs ?: "N/A"} g")
                         Text("Fat: ${dailySummary?.totalFat ?: "N/A"} g")
+                        Spacer(modifier = Modifier.height(8.dp))
+                        var weightInput by rememberSaveable { mutableStateOf(weightKg?.toString() ?: "") }
+                        Text(text = "Weight (kg): ${weightKg?.let { String.format("%.1f", it) } ?: "—"}")
+                        OutlinedTextField(
+                            value = weightInput,
+                            onValueChange = { weightInput = it },
+                            label = { Text("Enter weight for selected day (kg)") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            Button(onClick = {
+                                val v = weightInput.toFloatOrNull()
+                                if (v != null && v > 0f) viewModel.saveWeight(v)
+                            }) { Text("Save Weight") }
+                        }
                     }
                 }
 

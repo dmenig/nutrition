@@ -44,6 +44,9 @@ class DailyLogViewModel @Inject constructor(
     private val _sportLogs = MutableStateFlow<List<SportActivity>>(emptyList())
     val sportLogs: StateFlow<List<SportActivity>> = _sportLogs
 
+    private val _weightKg = MutableStateFlow<Float?>(null)
+    val weightKg: StateFlow<Float?> = _weightKg
+
     init {
         // Daily summary flow tied to selected date
         viewModelScope.launch {
@@ -137,10 +140,30 @@ class DailyLogViewModel @Inject constructor(
                     }
                 }
         }
+
+        // Weight for selected date (fetched from remote)
+        viewModelScope.launch {
+            _selectedDate
+                .collect { date ->
+                    val localDate = date.toInstant().atZone(ZoneId.systemDefault()).toLocalDate()
+                    val res = remoteRepository.getWeightForDate(localDate)
+                    _weightKg.value = res.getOrNull()
+                }
+        }
     }
 
     fun selectDate(date: Date) {
         _selectedDate.value = date
+    }
+
+    fun saveWeight(weight: Float) {
+        viewModelScope.launch {
+            val dt = selectedDate.value.toInstant().atZone(ZoneId.systemDefault()).toLocalDate().atStartOfDay()
+            val res = remoteRepository.upsertWeight(weight, dt)
+            if (res.isSuccess) {
+                _weightKg.value = weight
+            }
+        }
     }
 
     private fun toEpochMillis(dt: LocalDateTime): Long =
